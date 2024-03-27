@@ -1,0 +1,473 @@
+unit uConfig;
+
+interface
+
+uses
+  System.SysUtils, System.IOUtils, windows, System.Classes, uUtils, uDBManager,
+  Data.DBXJSON;
+
+type
+  TConfig = class
+  private
+    userresp: string;
+    configpath: string;
+    JSONString: string;
+    bUpdateConfig: boolean;
+
+  public
+    function UserInfo(): string;
+    function ReadConfig(): boolean;
+    function CreateJson(): string;
+    function IsConfigFound(): boolean;
+    function FillUserInfo(): string;
+    function EncryptString(): string;
+    function ReadKey: string;
+  end;
+
+implementation
+
+function TConfig.ReadConfig(): boolean; // 2
+var
+  JSONText: string;
+  JSONObject: TJSONObject;
+  AppJSONObject: TJSONObject;
+  Pair: TJSONPair;
+  index: integer;
+  UserJsonFile: TextFile;
+  EncrGitPass, EncrAccessToken: String;
+  DecrGitPass, DecrAccessToken: String;
+begin
+  Result := True;
+
+  JSONText := TFile.ReadAllText('appsetting.config');
+  JSONObject := TJSONObject.ParseJSONValue(JSONText) as TJSONObject;
+  try
+    if JSONObject.Get('appsettings').JsonValue.ToString <> '' then
+    begin
+      AppJSONObject := JSONObject.Get('appsettings').JsonValue as TJSONObject;
+      if AppJSONObject.Get('projectname').JsonValue.Value = '' then
+      begin
+        FillUserInfo();
+      end
+      else
+      begin
+        projectname := AppJSONObject.Get('projectname').JsonValue.Value;
+        webcodepath := AppJSONObject.Get('webcodepath').JsonValue.Value;
+        webcodepath := StringReplace(webcodepath, '\', '\\',
+          [rfReplaceAll, rfIgnoreCase]);
+        scriptpath := AppJSONObject.Get('scriptpath').JsonValue.Value;
+        scriptpath := StringReplace(scriptpath, '\', '\\',
+          [rfReplaceAll, rfIgnoreCase]);
+        GITPluginURL := AppJSONObject.Get('gitpluginurl').JsonValue.Value;
+        rmqclientpath := AppJSONObject.Get('rmqclientpath').JsonValue.Value;
+        // gitusername := AppJSONObject.Get('gitusername').JsonValue.Value;
+        // DecrGitPass := AppJSONObject.Get('gitpassword').JsonValue.Value;
+        // gitpassword := dbm.gf.DecryptFldValue(DecrGitPass, 't');
+        // client_id := AppJSONObject.Get('client_id').JsonValue.Value;
+        // client_secret := AppJSONObject.Get('client_secret').JsonValue.Value;
+        DecrAccessToken := AppJSONObject.Get('Access_Token').JsonValue.Value;
+        Access_Token := dbm.gf.DecryptFldValue(DecrAccessToken, 't');
+
+        // AESDecrypt(DecrGitPass,cKey);
+        UserInfo();
+      end;
+      if bUpdateConfig then
+      begin
+        AppJSONObject.Get('projectname').JsonValue :=
+          TJSONString.Create(projectname);
+        AppJSONObject.Get('gitpluginurl').JsonValue :=
+          TJSONString.Create(GITPluginURL);
+        // AppJSONObject.Get('gitusername').JsonValue :=
+        // TJSONString.Create(gitusername);
+        //
+        // EncrGitPass := dbm.gf.EncryptFldValue(gitpassword, 't');
+        // AppJSONObject.Get('gitpassword').JsonValue :=
+        // TJSONString.Create(EncrGitPass);
+        // AppJSONObject.Get('client_id').JsonValue :=
+        // TJSONString.Create(client_id);
+        // AppJSONObject.Get('client_secret').JsonValue :=
+        // TJSONString.Create(client_secret);
+        EncrAccessToken := dbm.gf.EncryptFldValue(Access_Token, 't');
+        AppJSONObject.Get('Access_Token').JsonValue :=
+          TJSONString.Create(EncrAccessToken);
+        AppJSONObject.Get('webcodepath').JsonValue :=
+          TJSONString.Create(webcodepath);
+        AppJSONObject.Get('rmqclientpath').JsonValue :=
+          TJSONString.Create(rmqclientpath);
+        AppJSONObject.Get('scriptpath').JsonValue :=
+          TJSONString.Create(scriptpath);
+        AssignFile(UserJsonFile, 'appsetting.config');
+        Rewrite(UserJsonFile);
+        writeln(UserJsonFile, JSONObject.ToString);
+        CloseFile(UserJsonFile);
+        UserInfo();
+      end;
+    end;
+  Except
+    on E: Exception do
+    begin
+      Console_write('Error: ' + E.Message, 12);
+      writeln;
+      readln;
+    end;
+  end;
+end;
+
+function TConfig.IsConfigFound(): boolean; // 1
+var
+  ConfigExists: boolean;
+  configFile: TextFile;
+  JsonData: string;
+  Enc, Dec: string;
+begin
+  try
+    if not Assigned(dbm) then
+      dbm := TDBManager.Create;
+    // Enc := dbm.gf.EncryptFldValue('123456789', 't');
+    // writeln(Enc);
+    // Dec := dbm.gf.DecryptFldValue(Enc, 't');
+    // writeln(Dec);
+    bUpdateConfig := False;
+    if FileExists('appsetting.config') then
+    begin
+      Result := True;
+      // ReadConfig();
+    end
+    else
+    begin
+      AssignFile(configFile, 'appsetting.config');
+      Rewrite(configFile);
+      JsonData := CreateJson();
+      writeln(configFile, JsonData);
+      CloseFile(configFile);
+      Result := True;
+
+    end;
+    ReadConfig();
+  finally
+    freeandnil(dbm);
+  end;
+
+end;
+
+function TConfig.FillUserInfo(): string;
+var
+  response: string;
+begin
+  writeln('Configuration Settings:');
+  writeln('=========================');
+  writeln;
+  Console_write('1.', 4);
+  write('Project Name: ');
+  readln(projectname);
+  Console_write('2.', 4);
+  //
+  if GITPluginURL = '' then
+  begin
+    // gitpluginurl:='https://github.com/Paroksh11/Axpert/tree/main/AxPlugins/';
+    GITPluginURL :=
+      'https://api.github.com/repos/Paroksh11/Axpert/contents/AxPlugins/';
+  end;
+  writeln('GIT Plugin URL: ' + GITPluginURL);
+  writeln('Do you want to change the GIT Plugin URL ? [y/n]');
+  readln(response);
+  if LowerCase(response) = 'y' then
+  begin
+    writeln('Enter GIT Plugin URL:');
+    readln(GITPluginURL);
+  end;
+  // Readln(gitpluginurl);
+  // Console_write('3.', 4);
+  // write('GIT Username: ');
+  // readln(gitusername);
+  // Console_write('4.', 4);
+  // write('GIT Password: ');
+  // gitpassword := EncryptString();
+  // Console_write('3.', 4);
+  // write('GIT Client Id: ');
+  // readln(client_id);
+  // Console_write('4.', 4);
+  // write('GIT Client Secret Id: ');
+  // readln(client_secret);
+  Console_write('3.', 4);
+  write('Access_Token: ');
+  Access_Token := EncryptString();
+  writeln(Access_Token);
+  Console_write('4.', 4);
+  write('Axpert Web Path: ');
+  readln(webcodepath);
+  webcodepath := StringReplace(webcodepath, '\', '\\',
+    [rfReplaceAll, rfIgnoreCase]);
+  Console_write('5.', 4);
+  write('RMQ Client Path: ');
+  readln(rmqclientpath);
+  rmqclientpath := StringReplace(rmqclientpath, '\', '\\',
+    [rfReplaceAll, rfIgnoreCase]);
+  Console_write('6.', 4);
+  write('Axpert Script Path: ');
+  readln(scriptpath);
+  scriptpath := StringReplace(scriptpath, '\', '\\',
+    [rfReplaceAll, rfIgnoreCase]);
+  writeln;
+  bUpdateConfig := True;
+end;
+
+function TConfig.UserInfo(): string;
+var
+  jsonfile: TextFile;
+  WebPath, RMQPath: string;
+begin
+  writeln;
+  writeln('Current Configuration:');
+  writeln('=========================');
+  Console_write('Project Name        : ', 12);
+  Console_write(projectname, 10);
+  writeln;
+  Console_write('GIT Plugin URL      : ', 12);
+  Console_write(GITPluginURL, 10);
+  writeln;
+  // Console_write('GIT username        : ', 12);
+  // Console_write(gitusername, 10);
+  // writeln;
+  // Console_write('GIT password        : ', 12);
+  // Console_write('*******', 10);
+  // writeln;
+  // Console_write('GIT Client ID        : ', 12);
+  // Console_write(client_id, 10);
+  // writeln;
+  // Console_write('GIT Client Secret ID        : ', 12);
+  // Console_write(client_secret, 10);
+  // writeln;
+  Console_write('Access_Token        : ', 12);
+  Console_write('************', 10);
+  writeln;
+  WebPath := StringReplace(webcodepath, '\\', '\',
+    [rfReplaceAll, rfIgnoreCase]);
+  Console_write('Axpert Web Path     : ', 12);
+  Console_write(WebPath, 10);
+  writeln;
+  RMQPath := StringReplace(rmqclientpath, '\\', '\',
+    [rfReplaceAll, rfIgnoreCase]);
+  Console_write('Axpert Web Path     : ', 12);
+  Console_write(RMQPath, 10);
+  writeln;
+  Console_write('Axpert Scripts Path : ', 12);
+  Console_write(scriptpath, 10);
+  writeln;
+  writeln;
+  begin
+    writeln('Do you want to continue with these settings?');
+    writeln;
+    write('Press [y] to continue [n] to modify..? ');
+    Console_write('[y/n]', 12);
+    writeln;
+    readln(userresp);
+    writeln;
+    userresp := LowerCase(userresp);
+    if userresp = 'n' then
+    begin
+      FillUserInfo();
+      writeln;
+      writeln('Configurations applied successfully...');
+      writeln;
+      // writeln('Configuration Settings:');
+      // writeln('------------------------');
+      // writeln('1. Project Name: ');
+      // Readln(projectname);
+      // WriteLn('2. GIT Username : ');
+      // Readln(gitusername);
+      // WriteLn('3. GIT Password: ');
+      // Readln(gitpassword);
+      // WriteLn('4. Axpert Web Path: ');
+      // Readln(webcodepath);
+      // webcodepath:=StringReplace(webcodepath,'\','\\',[rfReplaceAll, rfIgnoreCase]);
+      // WriteLn('5. Axpert Script Path: ');
+      // Readln(scriptpath);
+      // writeln;
+      // Writeln('Your new values are submitted successfully..');
+    end;
+    if userresp = 'y' then
+    begin
+      Exit;
+    end;
+    if (userresp <> 'y') and (userresp <> 'n') then
+    begin
+      repeat
+      begin
+        writeln('Give your response in y or n only');
+        write('Press [y] to continue [n] to modify..? ');
+        Console_write('[y/n]', 12);
+        writeln;
+        readln(userresp);
+        if userresp = 'n' then
+          FillUserInfo();
+      end;
+      until (userresp = 'y') or (userresp = 'n');
+
+    end;
+  end;
+end;
+
+function TConfig.CreateJson(): string;
+var
+  JSONText: string;
+  JSONObject: TJSONObject;
+  AppJSONObject: TJSONObject;
+  Pair: TJSONPair;
+begin
+  Result := '';
+  JSONObject := TJSONObject.Create;
+  try
+    AppJSONObject := TJSONObject.Create;
+    AppJSONObject.AddPair('projectname', TJSONString.Create(''));
+    AppJSONObject.AddPair('gitpluginurl', TJSONString.Create(''));
+    // AppJSONObject.AddPair('gitusername', TJSONString.Create(''));
+    // AppJSONObject.AddPair('gitpassword', TJSONString.Create(''));
+    // AppJSONObject.AddPair('client_id', TJSONString.Create(''));
+    // AppJSONObject.AddPair('client_secret', TJSONString.Create(''));
+    AppJSONObject.AddPair('Access_Token', TJSONString.Create(''));
+    AppJSONObject.AddPair('webcodepath', TJSONString.Create(''));
+    AppJSONObject.AddPair('rmqclientpath', TJSONString.Create(''));
+    AppJSONObject.AddPair('scriptpath', TJSONString.Create(''));
+    JSONObject.AddPair('appsettings', AppJSONObject);
+    Result := JSONObject.ToString;
+  Except
+    on E: Exception do
+    begin
+      Console_write('Error: ' + E.Message, 12);
+      writeln;
+      readln;
+    end;
+  end;
+end;
+
+function TConfig.EncryptString(): string;
+var
+  password: string;
+  key: Char; // Changed type to Char
+begin
+  try
+    password := '';
+    // Writeln('Enter password: ');
+    repeat
+      key := ReadKey;
+      if key <> #13 then
+      begin
+        if key = #8 then
+        begin
+          if Length(password) > 0 then
+          begin
+            Delete(password, Length(password), 1); // Delete the last character
+            Write(#8, ' ', #8);
+            // Move cursor back, write space, move cursor back again
+          end;
+        end
+        else
+        begin
+          password := password + key;
+          Write('*');
+        end;
+      end;
+    until key = #13;
+
+    writeln; // Move to the next line after the loop
+    Result := password;
+  except
+    on E: Exception do
+      writeln(E.ClassName, ': ', E.Message);
+  end;
+end;
+
+
+// function TConfig.EncryptString(): string;
+// var
+// password: string;
+// key: String;
+// begin
+// try
+// password := '';
+// // Writeln('Enter password: ');
+// repeat
+// key := ReadKey;
+// if key <> #13 then
+// begin
+// if key = #8 then
+// begin
+// if length(password) > 0 then
+// begin
+// Delete(password, length(password) - 1, 1);
+// Write(#8, ' ', #8);
+// end;
+// end
+// else
+// begin
+// password := password + key;
+// Write('*');
+// end;
+//
+// end;
+//
+// until key = #13;
+//
+// writeln;
+// Result := password;
+// except
+// on E: Exception do
+// writeln(E.ClassName, ': ', E.Message);
+// end;
+// end;
+
+function TConfig.ReadKey: Char;
+var
+  InputRec: TInputRecord;
+  NumRead: DWORD;
+begin
+  repeat
+    ReadConsoleInput(GetStdHandle(STD_INPUT_HANDLE), InputRec, 1, NumRead);
+    if (InputRec.EventType = KEY_EVENT) and InputRec.Event.KeyEvent.bKeyDown
+    then
+    begin
+      Result := Char(InputRec.Event.KeyEvent.AsciiChar);
+      Exit;
+    end;
+  until False;
+end;
+
+// function TConfig.ReadKey: string;
+// var
+// InputRec: TInputRecord;
+// NumRead: DWORD;
+// Buffer: string;
+// Key: Char;
+// begin
+// Buffer := '';
+// repeat
+// ReadConsoleInput(GetStdHandle(STD_INPUT_HANDLE), InputRec, 1, NumRead);
+// if (InputRec.EventType = KEY_EVENT) and InputRec.Event.KeyEvent.bKeyDown then
+// begin
+// Key := Char(InputRec.Event.KeyEvent.AsciiChar);
+// if Key <> #0 then // Ignore control keys
+// begin
+// if Key = #13 then // Enter key
+// Break
+// else if Key = #8 then // Backspace
+// begin
+// if Length(Buffer) > 0 then
+// begin
+// Delete(Buffer, Length(Buffer), 1);
+// Write(#8, ' ', #8);
+// end;
+// end
+// else
+// begin
+// Buffer := Buffer + Key;
+// Write('*'); // Print asterisk for each character added to the buffer
+// end;
+// end;
+// end;
+// until False;
+// Writeln; // Move to a new line after input
+// Result := Buffer;
+end;
+
+end.

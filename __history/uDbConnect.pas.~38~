@@ -1,0 +1,149 @@
+unit uDbConnect;
+
+interface
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants,
+  System.Classes, Vcl.Graphics,
+  Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls,
+  Vcl.Buttons, Vcl.ExtCtrls, Data.DB, DBClient,XmlDoc, XMLIntf, uXDS,uinstallation,
+  uDBManager,uAxprovider,uUtils;
+
+type
+  TDbConnect = class
+    private
+//      dbm: TDBManager;
+//      axprovider : TAxprovider;
+      x: TXDS;
+      inst:Tinstallation;
+      function DBConection():string;
+      function ConnecttoDB:Boolean;
+      function ReadAxprops():String;
+      procedure DestroyDBobj;
+      public
+      function DatabaseConnection():string;
+  end;
+
+  implementation
+
+  function TDbConnect.DatabaseConnection():string;
+  begin
+    DBConection();
+    //Readln;
+  end;
+
+  function TDbConnect.DBConection():string;
+  begin
+    if ConnecttoDB then
+    begin
+      inst:=Tinstallation.Create;
+    //  Writeln('Connected to db.');
+      inst.InstallAxpertStructures();
+      inst.ExecuteDBScripts();
+      inst.InstallRMQClient();
+    //  Writeln(selectedPlugin+' installation completed.');
+      inst.CompletionStatus();
+      readln;
+    end;
+  end;
+
+  function TDbConnect.ConnecttoDB:Boolean;
+  var
+    cnode: IXMLNode;
+    Errorstr, ConDbtype, MsDbverno, ConDriver, ConHost, ConDbusernm,
+    ConPwd: String;
+    ConXML: IXMLDocument;
+  begin
+    result := false;
+    if not Assigned(dbm) then
+      dbm := TDBManager.Create;
+
+    try
+      ReadAxprops;
+      ConDbusernm := lowercase(Trim(projectname));
+      dbm.gf.dbmflag := '';
+
+      dbm.gf.connectionname := ConDbusernm;
+      dbm.gf.AppName := ConDbusernm;
+      dbm.ConnectToDatabase(ConDbusernm);
+      result := true;
+  //    writeln('Connected');
+
+      if Assigned(axprovider) then
+      FreeAndNil(axprovider);
+      axprovider := TAxProvider.create(dbm);
+      Axprovider.dbm.gf.IsService := True;
+      if Assigned(x) then
+      begin
+        if x.Active then
+          x.close;
+        FreeAndNil(x);
+      end;
+      x := dbm.getxds(nil);
+    Errorstr := '';
+
+
+    Except
+      on E: Exception do
+      begin
+      Errorstr := E.Message;
+      end;
+    end;
+    if Errorstr <> '' then
+    begin
+      result := false;
+      dbm.gf.DoDebug.Log(dbm.gf.Axp_logstr + 'uAxpmanger\ConnecttoDB :' +
+      Errorstr);
+      DestroyDBobj;         //*******
+      ShowMessage(Errorstr);
+      Errorstr := '';
+    end;
+  end;
+
+  function TDbConnect.ReadAxprops():String;
+  var
+    pt: AnsiString;
+    axml: IXMLDocument;
+  begin
+    if not FileExists('Axprops.xml') then
+    begin
+      axml := LoadXMLData
+      ('<Axprops getfrom="" setto=""><lastlogin>mainikya</lastlogin><oradatestring>dd/mm/yyyy hh24:mi:ss</oradatestring><crlocation></crlocation><lastusername>profit</lastusername><login>local</login><ipaddress>192.168.1.65</ipaddress></Axprops>');
+      axml.SaveToFile('Axprops.xml');
+    end;
+    with TStringList.Create do
+    begin
+      pt := ExtractFilepath(Application.ExeName);
+      LoadFromFile(pt + 'Axprops.xml');
+      if Text = '' then
+        dbm.gf.Axprops := LoadXMLData('<root/>')
+      else
+        dbm.gf.Axprops := LoadXMLData(Text);
+
+      free;
+    end;
+    dbm.gf.localprops := dbm.gf.Axprops.DocumentElement;
+    if dbm.gf.localprops.HasAttribute('getfrom') then
+      dbm.gf.structGetFrom := VartoStr(dbm.gf.localprops.Attributes['getfrom']);
+    if dbm.gf.localprops.HasAttribute('setto') then
+      dbm.gf.structSetTo := VartoStr(dbm.gf.localprops.Attributes['setto']);
+  end;
+
+  procedure TDbConnect.DestroyDBobj;
+  begin
+    if Assigned(x) then
+    begin
+      if x.Active then
+        x.close;
+      FreeAndNil(x);
+    end;
+    if Assigned(axprovider) then
+      FreeAndNil(axprovider);
+    if Assigned(dbm) then
+      begin
+        dbm.Destroy;
+        dbm := nil;
+      end;
+  end;
+
+
+end.

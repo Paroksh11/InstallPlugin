@@ -1,0 +1,109 @@
+unit uInItApp;
+
+interface
+uses
+  System.SysUtils,uUtils,Windows;
+
+type
+  TInItApp = class
+  public
+  function WelcomeUser:string;
+  function pluginInfo():string;
+  function InstructionBeforeStart():string;
+  end;
+
+implementation
+  function TInItApp.WelcomeUser:string;
+  begin
+    Writeln;
+    Writeln('======================================');
+  //  Console_Writeln;
+    Writeln('         PLUGIN INSTALLER');
+   // Console_Writeln;
+    Writeln('======================================');
+    pluginInfo();
+    InstructionBeforeStart();
+  end;
+
+  function TInItApp.pluginInfo():string;
+  begin
+    Console_Writeln;
+    Write('  Welcome ');
+    Console_Write('to ', 3);
+    Write('the Plugin Installer ');
+    Console_Write('for ', 3);
+    Write('Axpert products.');
+    writeln;
+    Write('  This tool allows you ');
+    Console_Write('to ', 3);
+    Write('seamlessly integrate plugins with your ');
+    Console_Write('Axpert ', 3);
+    Write('ecosystem, extending its functionality to suit your needs.');
+    Writeln;
+    Writeln;
+    Console_Write('  Get ', 3);
+    Write('started by following the prompts ');
+    Console_Write('to ', 3);
+    Write('configure your plugin settings ');
+    Console_Write('and ', 3);
+    Console_Write('select ', 3);
+    Write('the plugins you wish to install.');
+    Console_Write('For ', 3);
+    Write('assistance, type');
+    Console_Write('''-h'' ', 3);
+    Write('or ');
+    Console_Write('''--help'' ', 3);
+    Write('for a list of available options.');
+    Writeln;
+    Writeln;
+    Console_Writeln('Lets Enhance your Axpert ecxperience together!', 10);
+    Writeln;
+  end;
+
+  function TInItApp.InstructionBeforeStart():string;
+  var
+    resp:string;
+  begin
+  try
+
+    Writeln('This process recommends to close your web application while installing plugin');//recom
+    Write('Do you want to continue installing plugin? ');
+    Console_write('[y/n]',12);
+    writeln;
+    Readln(resp);
+    resp:=LowerCase(resp);
+    if resp='n' then
+    begin
+      Writeln('Process is going to ends...');
+      ExitProcess(0);
+    end;
+    if resp='y' then
+    begin
+      isProceedNext:=True;
+    end;
+    if not ((resp ='y') and (resp='n')) then
+    begin
+        repeat
+          begin
+            Writeln('Give your response in y or n only');
+          end;
+        until ((resp ='y') or (resp='n')) ;
+        if (resp ='y') then
+        begin
+        end;
+        if (resp ='n') then
+        begin
+           Writeln('Process is going to ends...');
+           ExitProcess(0);
+        end;
+
+
+
+
+    end;
+    Except on E: Exception do
+      Writeln('An unexpected error occurred: ',E.Message);
+  end;
+
+  end;
+end.

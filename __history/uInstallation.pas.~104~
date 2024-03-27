@@ -1,0 +1,320 @@
+unit uInstallation;
+
+interface
+
+uses
+  Winapi.Windows, Winapi.Messages, System.SysUtils, System.Variants,
+  System.Classes,
+  Vcl.Graphics, Vcl.Controls, Vcl.Forms, Vcl.Dialogs, Vcl.StdCtrls,
+  IdBaseComponent,
+  IdComponent, IdTCPConnection, IdTCPClient, IdHTTP, IdSSLOpenSSL,
+  IdAuthentication,
+  Soap.EncdDecd, IdCoder, IdCoder3to4, IdCoderMIME, IdMultipartFormData,
+  StrUtils,
+  System.IOUtils, System.Types, System.Generics.Collections, DBXJSON, uUtils,
+  DB, DBClient,
+  SimpleDS, Provider, SqlExpr, DBXCommon, DBXOracle, uImportStructures,
+  uGitManager, uInstallDbScripts, uInstallRMQClients;
+
+type
+  TInstallation = class
+  public
+    function InstallPlugin(Plugin: string): string;
+    function InstallWebFiles(webfilepath: string; dstPath: string): string;
+    function InstallAxpertStructures(): string;
+    function ExecuteDBScripts(): string;
+    function InstallRMQClient(): string;
+    function ReadFile(Sourcepath: string; DestPath: string): string;
+    function FindFile(Sourcepath: string): string;
+    function FindFolder(path: string): string;
+    Function CompletionStatus(): string;
+
+  end;
+
+implementation
+
+function TInstallation.InstallPlugin(Plugin: string): string;
+// plugin=selectedplugin
+var
+  dpath: string;
+begin
+  // pluginLocalPath:=curdir+'\Plugin\';
+  writeln;
+  Console_write('2. Starting Plugin Installation:', 3);
+  writeln;
+  // ForceDirectories(dpath+selectedPlugin);
+  dpath := webcodepath + '\\' + cPlugins + '\\' + selectedPlugin;
+  InstallWebFiles(pluginLocalPath + selectedPlugin, dpath);
+  writeln;
+  // selectedPlugin;
+  // pluginLocalPath;//C:\Users\paroksh.AGILELABS\Desktop\Git_plugin\Plugin\
+end;
+
+function TInstallation.InstallWebFiles(webfilepath: string;
+  dstPath: string): string;
+var
+  webpath: string;
+  destinationPath: string;
+  Filename: string;
+begin
+  ForceDirectories(dstPath + '\' + cWebFiles + '\');
+  webpath := webfilepath + '\' + cWebFiles + '\';
+  // GETCURRENTDIRECTORY OR EXELOCATION
+  writeln('  - Installing Webfiles:');
+  Console_write
+    ('   - Copying files to corresponding webfolders from the local plugin directory.',
+    10);
+  writeln;
+  writeln;
+  FindFile(webpath);
+  FindFolder(webpath);
+end;
+
+function TInstallation.InstallAxpertStructures(): string;
+var
+  AxStruPath: string;
+  path: string;
+  FolderList: TStringDynArray;
+  FileList: TStringDynArray;
+  I, filecount, Count: integer;
+  FolderName: string;
+  fileArray: TArray<string>;
+  searchRec: TSearchRec;
+  ext: string;
+  imps: TImportStructures;
+  DefaultFolderName: string;
+begin
+  writeln('  - Importing Axpert Structures:');
+  Console_write('   - Importing form and report structures one by one.', 10);
+  writeln;
+  writeln;
+  try
+    AxStruPath := pluginLocalPath + selectedPlugin + '\' +
+      cAxpertStructures + '\';
+    FolderList := TDirectory.GetDirectories(AxStruPath);
+    Count := Length(FolderList);
+    imps := TImportStructures.create;
+    // FolderName:=FolderName+'\'+cAxExport;
+    for FolderName in FolderList do
+    begin
+      // AxStruPath:=AxStruPath+FolderName+'\';
+      DefaultFolderName := FolderName + '\' + cAxExport;
+      if FindFirst(DefaultFolderName + '*.*', faAnyFile, searchRec) = 0 then
+      begin
+        fileArray := TArray<string>(TDirectory.GetFiles(DefaultFolderName));
+        filecount := Length(fileArray);
+        for I := 0 to filecount - 1 do
+        begin
+          // ext:=ExtractFileExt(fileArray[I]);
+          imps.ImportStructure(fileArray[I]);
+          // AxStruPath:=pluginLocalPath+selectedplugin+'\AxpertStructure\';
+        end;
+        writeln;
+
+      end;
+    end;
+  except
+    on E: Exception do
+    begin
+      Console_write('Error: ' + E.Message, 12);
+      writeln;
+      readln;
+    end;
+  end;
+
+  // path:=pluginLocalPath+selectedplugin+'\AxpertStructure\'+filetype+'\'+FileName;
+end;
+
+function TInstallation.ExecuteDBScripts(): string;
+var
+  indbs: TInstallDbScripts;
+begin
+  try
+    indbs := nil;
+    // writeln('  - Executing DB Scripts:');
+    // Console_write('   - Reading and executing database scripts.', 10);
+    // writeln;
+    try
+      indbs := TInstallDbScripts.create;
+      indbs.ExecuteDBScripts();
+    except
+      on E: Exception do
+      begin
+        Console_write('Error: ' + E.Message, 12);
+        writeln;
+        readln;
+      end;
+
+    end;
+  finally
+    if assigned(indbs) then
+      freeandnil(indbs);
+  end;
+end;
+
+function TInstallation.InstallRMQClient(): string;
+var
+  inrmq: TInstallRMQClients;
+begin
+  try
+    inrmq := nil;
+    try
+      inrmq := TInstallRMQClients.create;
+      inrmq.InstallRMQClients();
+    except
+      on E: Exception do
+      begin
+        writeln('Error: ' + E.Message);
+        readln;
+      end;
+    end;
+  finally
+    if assigned(inrmq) then
+      freeandnil(inrmq);
+  end;
+end;
+
+function TInstallation.ReadFile(Sourcepath: string; DestPath: string): string;
+var
+  copiedfile: TextFile;
+  FileContent: string;
+  displayDestPath: string;
+begin
+  try
+    FileContent := TFile.ReadAllText(Sourcepath);
+    // writeln(ExtractFileName(Sourcepath)+' getting copied into '+DestPath);
+    AssignFile(copiedfile, DestPath);
+    Rewrite(copiedfile);
+    writeln(copiedfile, FileContent);
+    CloseFile(copiedfile);
+    displayDestPath := StringReplace(DestPath, '\\', '\', [rfReplaceAll]);
+    displayDestPath := Copy(displayDestPath, pos('AxPlugins', displayDestPath) +
+      Length('AxPlugins'), Length(displayDestPath) - pos('AxPlugins',
+      displayDestPath) - Length('AxPlugins') + 1);
+    write('   - Placing file ');
+    displayDestPath := StringReplace(displayDestPath, '\\', '\',
+      [rfReplaceAll]);
+    Console_write(extractFileName(Sourcepath) + ' ', 10);
+    write('in ...' + displayDestPath);
+    writeln;
+  except
+    on E: Exception do
+    begin
+      writeln('Error: ' + E.Message);
+      readln;
+    end;
+  end;
+end;
+
+function TInstallation.FindFile(Sourcepath: string): string;
+var
+  fileArray: TArray<string>;
+  searchRec: TSearchRec;
+  filecount, I: integer;
+  DestPath: string;
+  FolderName: string;
+begin
+  try
+    if FindFirst(Sourcepath + '*.*', faAnyFile, searchRec) = 0 then
+    begin
+      fileArray := TArray<string>(TDirectory.GetFiles(Sourcepath));
+      filecount := Length(fileArray);
+      DestPath := webcodepath + '\\' + cPlugins + '\\' + selectedPlugin;
+      ForceDirectories(DestPath + '\\' + cWebFiles + '\\');
+      DestPath := DestPath + '\\' + cWebFiles + '\\';
+      FolderName := extractFileName(Sourcepath);
+      for I := 0 to filecount - 1 do
+      begin
+        if FolderName = '' then
+        begin
+          ReadFile(fileArray[I], DestPath + extractFileName(fileArray[I]));
+        end
+        else
+        begin
+          ReadFile(fileArray[I], DestPath + FolderName + '\\' +
+            extractFileName(fileArray[I]));
+        end;
+      end;
+    end;
+  except
+    on E: Exception do
+    begin
+      writeln('Error: ' + E.Message);
+      readln;
+    end;
+  end;
+end;
+
+Function TInstallation.CompletionStatus(): string;
+var
+  Response: string;
+  Git: TGitManager;
+begin
+  try
+    writeln('INSTALLATION SUMMARY  ');
+    writeln('=======================');
+    writeln;
+    write('  -');
+    Console_write(selectedPlugin, 3);
+    write(' installation completed without errors.');
+    writeln;
+    writeln;
+    write('Would you like to continue installation? ');
+    Console_write('[y/n]', 12);
+    writeln;
+    readln(Response);
+    if LowerCase(Response) = 'y' then
+    begin
+      Git := TGitManager.create;
+      Git.listOfPlugins();
+    end;
+  Except
+    on E: Exception do
+    begin
+      writeln('Error: ' + E.Message);
+      readln;
+    end;
+
+  end;
+
+end;
+
+function TInstallation.FindFolder(path: string): string;
+var
+  folderArray: TArray<string>;
+  foldercount, I: integer;
+  searchRec: TSearchRec;
+  destinationPath: string;
+begin
+  try
+
+    if not directoryExists(path) then
+    begin
+      writeln;
+      writeln('  - Webfiles are not available for ' + selectedPlugin);
+      exit;
+    end;
+
+    folderArray := TArray<string>(TDirectory.GetDirectories(path));
+    destinationPath := webcodepath + '\\' + cPlugins + '\\' + selectedPlugin;
+    ForceDirectories(destinationPath + '\\' + cWebFiles + '\\');
+    destinationPath := destinationPath + '\\' + cWebFiles + '\\';
+    foldercount := Length(folderArray);
+    for I := 0 to foldercount - 1 do
+    begin
+      ForceDirectories(destinationPath + extractFileName(folderArray[I]));
+      FindFile(path + extractFileName(folderArray[I]));
+    end;
+
+    // CopyFilesRecursively('D:\Workspace\install_plugin\Win64\Debug\Plugin\Plugin1','C:\Users\paroksh.AGILELABS\Desktop\PluginWeb\Plugin\Plugin1\Webfiles');
+    // Readln;
+  except
+    on E: Exception do
+    begin
+      writeln('Error: ' + E.Message);
+      readln;
+    end;
+  end;
+end;
+
+end.

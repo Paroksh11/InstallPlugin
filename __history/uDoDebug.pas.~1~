@@ -1,0 +1,190 @@
+unit uDoDebug;
+{ Copied from  Ver 9.8\New Licensing Changes - 9.8latest}
+interface
+
+Uses
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
+  Db, Buttons, Menus, StrUtils;
+
+type
+  TOnDebug = Procedure(s:string) of object;
+
+  TDoDebug = class
+  private
+    fActive : Boolean;
+    procedure SetActive(flg:boolean);
+    procedure WriteMsg(s: string);
+    procedure Dummy(s:string);
+  public
+    Msg : TOnDebug;
+    filename,debugcomp,exedetails : string;
+    Axp_logfname:string;
+    tracefile : TStringList;
+    isservice : boolean;
+    bWriteFlag : Boolean;
+    IsRapidPost : Boolean;
+    constructor create;
+    destructor destroy; override;
+    property Active :Boolean read fActive write SetActive;
+    procedure clear;
+    procedure Log(s: string);
+
+  end;
+
+implementation
+
+constructor TDoDebug.create;
+begin
+  inherited;
+  tracefile := TStringList.Create;
+  Active:=false;
+  debugcomp := '';
+  isservice := false;
+  Axp_logfname := '';
+  bWriteFlag := True;
+  IsRapidPost := False;
+end;
+
+destructor TDoDebug.destroy;
+begin
+  if assigned(tracefile) then
+  begin
+    tracefile.Clear;
+    FreeAndNil(tracefile);
+  end;
+  inherited;
+end;
+
+procedure TDoDebug.WriteMsg(s: string);
+var
+  f: textfile;
+begin
+  if not bWriteFlag then
+    exit;
+  if pos('axliccontrol', lowercase(s)) > 0 then
+    exit;
+  if pos('connectinfo', lowercase(s)) > 0 then
+    exit;
+  try
+    // Switch off I/O error checking
+    {$IOCHECKS off}
+    try
+      assignfile(f, filename);
+      if fileexists(filename) then
+        append(f)
+      else
+        rewrite(f);
+      if copy(s, 1, 2) = '>>' then
+        writeln(f, '');
+      writeln(f, s);
+      closefile(f);
+    Except
+      on E: Exception do
+      begin
+        //IO check is off so no IO exceptions will be raised , but still we added
+        //this code to handle other exceptions
+        Log('Trace message ' + s);
+        Log('Exception on WriteMsg ' + E.Message);
+      end;
+    end;
+  finally
+    try
+      if IOResult = 0 then
+      begin
+        // do nothing -no error
+      end
+      else
+      begin
+        Log('Trace message ' + s);
+        Log('WriteMsg failed with error ' + InttoStr(IOResult));
+      end;
+    Except
+
+    end;
+    // Switch IO checking back on
+    {$IOCHECKS on}
+  end;
+end;
+
+procedure TDoDebug.SetActive(flg:boolean);
+begin
+  fActive:=flg;
+  if filename = '' then filename := 'tracemsg.txt';
+  if not isservice then
+     if fileexists(filename) and (fActive) then DeleteFile(filename);
+  if active then
+  begin
+     msg:=writemsg;
+     if not isservice then writemsg(exedetails);
+  end else msg:=dummy;
+end;
+
+procedure TDoDebug.Dummy(s:string);
+begin
+  if isservice then exit;
+  if debugcomp <> '' then tracefile.Add(s);
+end;
+
+procedure TDoDebug.clear;
+begin
+end;
+
+procedure TDODebug.Log(s:string);
+var f:textfile;
+    s1:string;
+begin
+ { assignfile(f, filename);
+  if fileexists(filename) then append(f) else rewrite(f); }
+  if (isservice) and (not IsRapidPost)  then exit;
+  {
+  begin
+      s1 := GetCurrentDir + '\ExceptionLog' ;
+      if not DirectoryExists(s1) then CreateDir(s1);
+      if Axp_logfname = '' then
+         Axp_logfname := s1 + '\' + FormatDateTime('dd_mm_yyyy_hhmmss',now()) + '.txt'
+      else
+         Axp_logfname := s1 + '\' + ExtractFileName(Axp_logfname);
+  end;
+  }
+  if Axp_logfname = '' then Axp_logfname := 'tracemsg.txt';
+    try
+    // Switch off I/O error checking
+    {$IOCHECKS off}
+    try
+      assignfile(f, Axp_logfname);
+      if fileexists(Axp_logfname) then append(f) else rewrite(f);
+      if copy(s,1,2)='>>' then writeln(f, '');
+      writeln(f, s);
+      closefile(f);
+    Except
+      on E: Exception do
+      begin
+        //IO check is off so no IO exceptions will be raised , but still we added
+        //this code to handle other exceptions
+        Log('Log message ' + s);
+        Log('Exception on Log ' + E.Message);
+      end;
+    end;
+  finally
+    try
+      if IOResult = 0 then
+      begin
+        // do nothing -no error
+      end
+      else
+      begin
+        Log('Log message ' + s);
+        Log('Log failed with error ' + InttoStr(IOResult));
+      end;
+    Except
+
+    end;
+    // Switch IO checking back on
+    {$IOCHECKS on}
+  end;
+
+
+end;
+
+
+end.

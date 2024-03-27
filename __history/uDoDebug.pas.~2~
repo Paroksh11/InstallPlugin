@@ -1,0 +1,125 @@
+unit uDoDebug;
+{ Copied from  Ver 9.8\New Licensing Changes - 9.8latest}
+{Copied from Axpert9-XE3\Ver 11.0\Action_DBConn_Lost}
+
+interface
+
+Uses
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
+  Db, Buttons, Menus, StrUtils;
+
+type
+  TOnDebug = Procedure(s:string) of object;
+
+  TDoDebug = class
+  private
+    fActive : Boolean;
+    procedure SetActive(flg:boolean);
+    procedure WriteMsg(s: string);
+    procedure Dummy(s:string);
+  public
+    Msg : TOnDebug;
+    filename,debugcomp,exedetails : string;
+    Axp_logfname:string;
+    tracefile : TStringList;
+    isservice : boolean;
+    bWriteFlag,writelog : Boolean;
+    constructor create;
+    destructor destroy; override;
+    property Active :Boolean read fActive write SetActive;
+    procedure clear;
+    procedure Log(s: string);
+
+  end;
+
+implementation
+
+constructor TDoDebug.create;
+begin
+  inherited;
+  tracefile := TStringList.Create;
+  Active:=false;
+  debugcomp := '';
+  isservice := false;
+  Axp_logfname := '';
+  bWriteFlag := True;
+  writelog := false;
+end;
+
+destructor TDoDebug.destroy;
+begin
+  if assigned(tracefile) then
+  begin
+    tracefile.Clear;
+    FreeAndNil(tracefile);
+  end;
+  inherited;
+end;
+
+procedure TDODebug.WriteMsg(s:string);
+var f:textfile;
+begin
+  if writelog then tracefile.Add(s);
+  if not bWriteFlag then
+    exit;
+  if pos('axliccontrol',lowercase(s)) > 0 then exit;
+  if pos('connectinfo',lowercase(s)) > 0 then exit;
+  assignfile(f, filename);
+  if fileexists(filename) then append(f) else rewrite(f);
+  if copy(s,1,2)='>>' then writeln(f, '');
+  writeln(f, s);
+  closefile(f);
+end;
+
+procedure TDoDebug.SetActive(flg:boolean);
+begin
+  fActive:=flg;
+  if filename = '' then filename := 'tracemsg.txt';
+  if not isservice then
+     if fileexists(filename) and (fActive) then DeleteFile(filename);
+  if active then
+  begin
+     msg:=writemsg;
+     if not isservice then writemsg(exedetails);
+  end else msg:=dummy;
+end;
+
+procedure TDoDebug.Dummy(s:string);
+begin
+  if writelog then  tracefile.Add(s);
+  if isservice then exit;
+  if debugcomp <> '' then tracefile.Add(s);
+end;
+
+procedure TDoDebug.clear;
+begin
+end;
+
+procedure TDODebug.Log(s:string);
+var f:textfile;
+    s1:string;
+begin
+ { assignfile(f, filename);
+  if fileexists(filename) then append(f) else rewrite(f); }
+  if writelog then tracefile.Add(s);
+  if isservice then exit;
+  {
+  begin
+      s1 := GetCurrentDir + '\ExceptionLog' ;
+      if not DirectoryExists(s1) then CreateDir(s1);
+      if Axp_logfname = '' then
+         Axp_logfname := s1 + '\' + FormatDateTime('dd_mm_yyyy_hhmmss',now()) + '.txt'
+      else
+         Axp_logfname := s1 + '\' + ExtractFileName(Axp_logfname);
+  end;
+  }
+  if Axp_logfname = '' then exit;
+  assignfile(f, Axp_logfname);
+  if fileexists(Axp_logfname) then append(f) else rewrite(f);
+  if copy(s,1,2)='>>' then writeln(f, '');
+  writeln(f, s);
+  closefile(f);
+end;
+
+
+end.

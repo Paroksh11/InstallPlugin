@@ -1,0 +1,540 @@
+unit uFormNotifications;
+{uFormNotifications unit}
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms, db,
+  Dialogs, Grids, ExtCtrls, StdCtrls, ComCtrls,Clipbrd, dateutils, uXDS,
+  uStructDef,uParse,XMLDoc,XMLIntf,StrUtils,uStoreData,uProfitEval,{uDBCall,uASBDataObj,}
+  {uAxFastRun,}Soap.EncdDecd,uPublishToRMQ,{uAutoPrint,}
+  // Delphi XE3 has a DBXJson object for JSON support but above that version (>XE3) DBXJson is deprecated and JSON object is used.
+{$IF CompilerVersion > 24.0}
+      JSON
+{$ELSE}
+      DBXJson
+{$IFEND}
+      ;
+
+type
+
+  TFormNotifications = class
+  private
+    //Newly introduced , before to this itself structdef and storedata introduced  ele it could have been avoided
+    //Optimize it in the future
+    //DBCall : TDBCall;
+    structdef : TStructDef;
+    Parser : TProfitEval;
+
+    sAxFormNotifyMailMsg,sAxFormNotifyMailSub : String;
+    sAxFormNotifyTitle,sAxFormNotifyContent : String;
+    bAddPublishRMQObjtoList : Boolean;
+
+    PublishMsgObjList: TList;
+
+    procedure EvaluateAndProcessFormNotify(pInDataSet: TXDS);
+    function EvaluateExpr(pExpression: String): Boolean;
+    procedure Init;
+    function PrepareScriptsAPIRequestPayload(pAxFormNotifyId: String): String;
+    procedure PushSaveDataToQueue(sQueueName, sAPIPayload: String);
+    function FillDynamicParams(pInputStr: String): String;
+
+
+  Public
+    StoreData : TStoreData;
+    ParserObject : TObject;
+
+    sAxDataMode : String;
+    RecId : Extended;
+
+    constructor create(pStructDef : TStructDef); virtual;
+    destructor destroy; override;
+
+    procedure ProcessFormNotify;
+    procedure PushMessagesToRMQ;
+
+
+end;
+
+implementation
+
+//FormNotifications
+
+//Create
+constructor TFormNotifications.create(pStructDef : TStructDef);
+begin
+  //create
+  structdef := pStructDef;
+
+  //DBCall := nil;
+  Storedata := nil;
+  Parser := nil;
+
+  //StoreDataObject := nil;
+  ParserObject := nil;
+  sAxDataMode := '';
+  PublishMsgObjList:= nil;
+
+  PublishMsgObjList:= TList.create;
+  bAddPublishRMQObjtoList := True;//Push to RMQ obj List
+end;
+
+//Destroy
+destructor TFormNotifications.Destroy;
+var
+  iIdx : Integer;
+begin
+  //Destroy
+  if Assigned(PublishMsgObjList) then
+  begin
+    try
+      // Clear the list and destroy the objects
+      for iIdx := 0 to PublishMsgObjList.Count - 1 do
+      begin
+        if Assigned(PublishMsgObjList[iIdx]) then
+        begin
+          TPublishToRMQ(PublishMsgObjList[iIdx]).Free;
+        end;
+      end;
+      PublishMsgObjList.Clear;
+    finally
+      PublishMsgObjList.Free;
+    end;
+  end;
+  //Clearing structdef & Parser obj may not be required since those are referring other objects
+  inherited;
+end;
+
+Procedure TFormNotifications.Init;
+begin
+  if Assigned(ParserObject) then
+    Parser := TProfitEval(ParserObject);
+end;
+
+//EscapeCRLF
+function EscapeCRLF(const Input: string): string;
+begin
+  // Replace CR LF with \r\n
+  Result := StringReplace(Input, #13#10, '\r\n', [rfReplaceAll]);
+end;
+
+
+//PrepareScriptsAPIRequestPayload
+Function TFormNotifications.PrepareScriptsAPIRequestPayload(pAxFormNotifyId : String): String;
+var
+  sRecordId,sTrace,sStructType : String;
+  sScriptName,sNotifyQueueName : String;
+
+  jsonPayloadRequest,jsonInnerObject : TJSONObject;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uFormNotifications/PrepareScriptsAPIRequestPayload starts...');
+  try
+    result := '';
+    jsonPayloadRequest := nil;
+    jsonInnerObject := nil;
+
+    sScriptName := 'axpeg_notification';
+    sNotifyQueueName := 'axpeg_notification';
+
+    sRecordId := '0';
+    if sAxDataMode <> 'd' then //if not delete mode then set recid
+      sRecordId := FloatToStr(RecId);//FloatToStr(StoreData.LastSavedRecordId);
+    //deleted record can not be loaded during notifications , so the recordid not required.
+    //Same to be checked for cancel as well
+
+    sTrace := 'False';
+    if structdef.axprovider.dbm.gf.DoDebug.Active then
+      sTrace := 'True';
+
+    sStructType := 'tstructs';
+
+    jsonPayloadRequest := TJSONObject.create();
+    jsonInnerObject := TJSONObject.create;
+
+    jsonInnerObject.AddPair(TJSONPair.create('axpapp',
+      structdef.axprovider.dbm.connection.connectionname));
+    jsonInnerObject.AddPair(TJSONPair.create('username',
+      structdef.axprovider.dbm.gf.username));
+    jsonInnerObject.AddPair(TJSONPair.create('scriptname', sScriptName));
+    jsonInnerObject.AddPair(TJSONPair.create('stype', sStructType));
+    jsonInnerObject.AddPair(TJSONPair.create('sname', StoreData.TransType));
+    jsonInnerObject.AddPair(TJSONPair.create('recordid', sRecordId));
+    jsonInnerObject.AddPair(TJSONPair.create('trace', sTrace));
+
+    //isformnotification
+    jsonInnerObject.AddPair(TJSONPair.create('isformnotification', 'true'));
+    //axformnotifyid - axformnotify table primary field value
+    jsonInnerObject.AddPair(TJSONPair.create('axformnotifyid',
+      pAxFormNotifyId));
+    //datamode - n-new/e-edit/d-delete/c-cancel
+    jsonInnerObject.AddPair(TJSONPair.create('datamode',
+      sAxDataMode));
+    //creator - Transaction Initiator
+    jsonInnerObject.AddPair(TJSONPair.create('creator',
+      StoreData.CreatedBy));
+
+    //mailsub - Email subject
+    jsonInnerObject.AddPair(TJSONPair.create('mailsub',
+      sAxFormNotifyMailSub));
+
+    //mailmsg - Email Message
+    jsonInnerObject.AddPair(TJSONPair.create('mailmsg',
+      sAxFormNotifyMailMsg));
+
+    //notifytitle - Notification Title
+    jsonInnerObject.AddPair(TJSONPair.create('notifytitle',
+      sAxFormNotifyTitle));
+
+    //notifymsg - Notification Message
+    jsonInnerObject.AddPair(TJSONPair.create('notifymsg',
+      sAxFormNotifyContent));
+
+    jsonPayloadRequest.AddPair('scriptsapi', jsonInnerObject);
+    jsonPayloadRequest.AddPair('varlist',
+      TJSONObject.ParseJSONValue('{"row":{}}'));
+
+    result :=  jsonPayloadRequest.ToString;
+    structdef.axprovider.dbm.gf.DoDebug.msg
+      ('uFormNotifications/Scripts RequestPayload ' + result);
+  finally
+    jsonPayloadRequest := nil;
+    jsonInnerObject := nil;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uFormNotifications/PrepareScriptsAPIRequestPayload ends.');
+end;
+
+
+
+//EvaluateExpr
+Function TFormNotifications.EvaluateExpr(pExpression : String):Boolean;
+var
+  sExpressionResult : String;
+begin
+  result := false;
+  structdef.axprovider.dbm.gf.dodebug.msg('EvaluateExpr starts...');
+  if Assigned(Parser) then
+  begin
+     structdef.axprovider.dbm.gf.dodebug.msg('Evaluating Expression :'+pExpression);
+     Parser.Evaluate(pExpression);
+     sExpressionResult := Parser.Value;
+     structdef.axprovider.dbm.gf.dodebug.msg('Result of Expression :'+sExpressionResult);
+     result := lowercase(sExpressionResult) = 't';
+  end
+  else
+    structdef.axprovider.dbm.gf.dodebug.msg('Parser is not assigned.');
+  structdef.axprovider.dbm.gf.dodebug.msg('EvaluateExpr ends.');
+end;
+
+
+//IsValidVariableName
+function IsValidVariableName(s : String) : Boolean;
+  var i : integer;
+  c : String;
+begin
+  result := True;
+  for i := 1 to length(s) do
+  begin
+     c := copy(s,i,1);
+     if pos(c,'abcdefghijklmnopqrstuvwxyz_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ') > 0 then continue
+     else
+     begin
+       result := false;
+       break
+     end;
+  end;
+end;
+
+//FillDynamicParams | :dynamicvar
+Function TFormNotifications.FillDynamicParams(pInputStr : String):String;
+var orgInputStr, SQLText, PName,pValue, S:String;
+    p1, p2, l , i, iIdx : integer;
+    StrAfterP1pos : String;
+begin
+  Result := pInputStr;
+  structdef.Axprovider.dbm.gf.DoDebug.msg('FillDynamicParams');
+  structdef.Axprovider.dbm.gf.DoDebug.msg(pInputStr);
+  if (Trim(pInputStr) = '') or (pos(':', pInputStr) = 0) then
+  begin
+    structdef.Axprovider.dbm.gf.DoDebug.msg('Exiting from FillDynamicParams.');
+    exit;
+  end;
+  orgInputStr := pInputStr;
+  while true do begin
+    p1 := pos(':', pInputStr);
+    If p1 = 0 Then break;
+    StrAfterP1pos := Copy(pInputStr, p1 + 1, length(pInputStr));
+    iIdx := 1;
+    while IsValidVariableName(StrAfterP1pos[iIdx]) do
+    begin
+      inc(iIdx);
+    end;
+    p2 := iIdx-1;
+    pName := (Copy(pInputStr, p1 + 1, p2));
+    pValue := '';
+    if pName<>'' then begin
+      if assigned(Parser) then
+      begin
+        pValue:=Parser.GetVarValue(pName);
+      end;
+      if (pValue = '') and Assigned(storedata) then
+        pValue:=storedata.GetFieldValue(pName,1);
+    end;
+    Delete(pInputStr, p1, p2+1);
+    if pValue = '' then
+      Insert(' '+pName, pInputStr, p1)//Added dummy string to avoid unwanted string replace in the original string
+    else
+      Insert(pValue, pInputStr, p1);
+    if pValue <> '' then
+    begin
+      Delete(orgInputStr, p1, p2+1);
+      Insert(pValue, orgInputStr, p1);
+    end;
+  end;
+  result := orgInputStr;
+  structdef.Axprovider.dbm.gf.DoDebug.msg('FillDynamicParams :  RESULT : ');
+end;
+
+//EvaluateAndProcessFormNotify
+procedure TFormNotifications.EvaluateAndProcessFormNotify(pInDataSet : TXDS);
+var
+  sExpression,sTransId,sAxFormNotifyId : String;
+  sQueueName,sFormNotifyPayload,sDummySubject : String;
+  sMailSubFld,sMailMsgFld,sNotifyTitleFld,sNotifyContentFld : String;
+
+  bTriggerNotify : Boolean;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg('EvaluateAndProcessFormNotify starts...');
+  try
+     bTriggerNotify := False;
+
+     while Not pInDataSet.CDS.Eof do
+     begin
+       sExpression := pInDataSet.CDS.FieldByName('formula_expr').AsString;
+       if Trim(sExpression) = '' then
+          bTriggerNotify := True
+       else
+          bTriggerNotify := EvaluateExpr(sExpression);
+       if bTriggerNotify then
+       begin
+        structdef.axprovider.dbm.gf.DoDebug.msg('Condition statisfied,Preparing form notification ');
+        sTransId := pInDataSet.CDS.FieldByName('stransid').AsString;
+        sAxFormNotifyId := pInDataSet.CDS.FieldByName('axformnotifyid').AsString;
+
+        //On del / cancel if we use dynamic content that can not be replaced in Scripts API
+        //Since data can not be loaded. due to that we fetched sub and body content
+        //and replacing dynamic values and adding it in the request payload which will be
+        //used while processing form notifications.
+        if sAxDataMode = 'n' then
+        begin
+          sMailMsgFld := 'email_msg_new';
+          sMailSubFld := 'email_sub_new';
+
+          sNotifyTitleFld := 'notify_sub_new';
+          sNotifyContentFld := 'notify_msg_new';
+
+          sDummySubject := 'Alert : New transaction added in the form '+storedata.Structdef.Caption;
+        end
+        else if sAxDataMode = 'e' then
+        begin
+          sMailMsgFld := 'email_msg_edit';
+          sMailSubFld := 'email_sub_edit';
+
+          sNotifyTitleFld := 'notify_sub_edit';
+          sNotifyContentFld := 'notify_msg_edit';
+
+          sDummySubject := 'Alert : Transaction modified in the form '+storedata.Structdef.Caption;
+        end
+        else if sAxDataMode = 'd' then
+        begin
+          sMailMsgFld := 'email_msg_delete';
+          sMailSubFld := 'email_sub_delete';
+
+          sNotifyTitleFld := 'notify_sub_delete';
+          sNotifyContentFld := 'notify_msg_delete';
+
+          sDummySubject := 'Alert : Transaction deleted from the form '+storedata.Structdef.Caption;
+        end
+        else if sAxDataMode = 'c' then
+        begin
+          sMailMsgFld := 'email_msg_cancel';
+          sMailSubFld := 'email_sub_cancel';
+
+          sNotifyTitleFld := 'notify_sub_cancel';
+          sNotifyContentFld := 'notify_msg_cancel';
+          sDummySubject := 'Alert : Transaction cancelled on the form '+storedata.Structdef.Caption;
+        end;
+        if pInDataSet.CDS.FindField(sMailSubFld) <> nil then
+          sAxFormNotifyMailSub := pInDataSet.CDS.FieldByName(sMailSubFld).AsString
+        else
+          sAxFormNotifyMailSub :=  sDummySubject;
+        sAxFormNotifyMailSub := FillDynamicParams(sAxFormNotifyMailSub);
+
+        sAxFormNotifyMailMsg := pInDataSet.CDS.FieldByName(sMailMsgFld).AsString;
+        sAxFormNotifyMailMsg := FillDynamicParams(sAxFormNotifyMailMsg);
+
+        if pInDataSet.CDS.FindField(sNotifyTitleFld) <> nil then
+          sAxFormNotifyTitle := pInDataSet.CDS.FieldByName(sNotifyTitleFld).AsString
+        else
+          sAxFormNotifyTitle :=  sDummySubject;
+        sAxFormNotifyTitle := FillDynamicParams(sAxFormNotifyTitle);
+        sAxFormNotifyContent := pInDataSet.CDS.FieldByName(sNotifyContentFld).AsString;
+        sAxFormNotifyContent := FillDynamicParams(sAxFormNotifyContent);
+
+        sQueueName := 'axpeg_notification';//default queuename
+        sFormNotifyPayload := PrepareScriptsAPIRequestPayload(sAxFormNotifyId);
+        PushSaveDataToQueue(sQueueName,sFormNotifyPayload);
+       end
+       else
+        structdef.axprovider.dbm.gf.DoDebug.msg('Condition ('+sExpression+') not statisfied.');
+       pInDataSet.CDS.Next;
+     end;
+  Except
+    on E: Exception do
+    begin
+      structdef.axprovider.dbm.gf.DoDebug.msg('Error in EvaluateAndProcessFormNotify ' + E.Message);
+      raise Exception.Create(E.Message);
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('EvaluateAndProcessFormNotify ends.');
+end;
+
+
+//ProcessFormNotify
+procedure TFormNotifications.ProcessFormNotify;
+var
+  x1: Txds;
+  whrStr, table, QryStr, OrderByStr : String;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg('ProcessFormNotify starts...');
+  //Init
+  Init;
+
+  table := 'AxFormNotify';
+  whrStr := ' Where lower(active) = ''t'' and stransid = '+QuotedStr(Storedata.TransType);
+  OrderByStr := ' order by createdon asc';
+  QryStr := 'select * from '+table+' '+whrStr + OrderByStr;
+  try
+    try
+      x1 := nil;
+      x1 := structdef.axprovider.dbm.GetXDS(nil);
+      x1.buffered := True;
+      x1.cds.Commandtext := QryStr;
+      structdef.axprovider.dbm.gf.DoDebug.msg('ProcessFormNotify SQL Query : '+QryStr);
+      x1.open;
+      if not x1.isempty then
+      begin
+        EvaluateAndProcessFormNotify(x1);
+      end;
+    Except
+      on E: Exception do
+        structdef.axprovider.dbm.gf.DoDebug.msg('Error in ProcessFormNotify ' + E.Message);
+    end;
+  finally
+    if Assigned(x1) then
+    begin
+      x1.free;
+      x1 := nil;
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('ProcessFormNotify ends.');
+end;
+
+
+//PushSaveDataToQueue
+Procedure TFormNotifications.PushSaveDataToQueue(sQueueName,sAPIPayload: String);
+var
+  PublishToRMQ : TPublishToRMQ;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg('FormNotifications/PushSaveDataToQueue starts...');
+  try
+    PublishToRMQ := nil;
+    try
+      PublishToRMQ := TPublishToRMQ.create(structdef);
+      PublishToRMQ.bIsPEGV2 := True;
+      PublishToRMQ.Parser := Parser;
+      PublishToRMQ.SDEvaluateExpr := nil;
+      if Assigned(Parser) then
+      begin
+        //Variables return var name when its not found/empty it has to be handled.
+        PublishToRMQ.sRMQ_APIURL := Parser.GetVarValue('AxRMQAPIURL');
+        PublishToRMQ.sScripts_APIURL := Parser.GetVarValue('AxScriptsAPIURL');
+        PublishToRMQ.sNotifyQueueName := sQueueName;
+      end;
+      PublishToRMQ.jsonPayloadRequest := TJSONObject.ParseJSONValue(TEncoding.ASCII.GetBytes(sAPIPayload),
+          0) as TJSONObject;
+      PublishToRMQ.bScriptJobs := False;
+      if bAddPublishRMQObjtoList then
+        PublishMsgObjList.Add(PublishToRMQ) // Ownership transfer
+      else
+        PublishToRMQ.PushMessageToRMQ(sAPIPayload,'0');
+    Except on E:Exception do
+    begin
+      structdef.axprovider.dbm.gf.DoDebug.msg('FormNotifications/Error in PushSaveDataToQueue : '+E.Message);
+    end;
+    end;
+  finally
+    if bAddPublishRMQObjtoList then
+      PublishToRMQ := nil
+    else
+    begin
+      if Assigned(PublishToRMQ) then
+        FreeAndNil(PublishToRMQ);
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('FormNotifications/PushSaveDataToQueue ends.');
+end;
+
+
+//PushMessagesToRMQ
+(*
+ Process PublishMsgObjList TList
+*)
+Procedure TFormNotifications.PushMessagesToRMQ;
+var
+  iIdx : Integer;
+  json_Request : TJSONObject;
+  stream : TStringStream;
+  sRequesStr : String;
+begin
+  try
+  structdef.axprovider.dbm.gf.DoDebug.msg('PushMessagesToRMQ starts...');
+  json_Request := nil;
+  stream := nil;
+  if Not bAddPublishRMQObjtoList then
+  begin
+    structdef.axprovider.dbm.gf.DoDebug.msg('PushMessagesToRMQ/Messages processed already.');
+    Exit;
+  end;
+  try
+  if Assigned(PublishMsgObjList) then
+  begin
+    for iIdx := 0 to PublishMsgObjList.Count - 1 do
+    begin
+      if Assigned(PublishMsgObjList[iIdx]) then
+      begin
+        json_Request :=  TPublishToRMQ(PublishMsgObjList[iIdx]).jsonPayloadRequest;
+        if Assigned(json_Request) then
+        begin
+          //below stmnt not required , since we refer to jsonPayloadRequest in PublishtoRMQ
+          sRequesStr :=  json_Request.ToString;
+          // Convert the JSON object to a string using UTF-8 encoding
+          structdef.axprovider.dbm.gf.DoDebug.msg('Processing request '+sRequesStr);
+          TPublishToRMQ(PublishMsgObjList[iIdx]).PushMessageToRMQ(sRequesStr,'0');;
+        end
+        else
+          structdef.axprovider.dbm.gf.DoDebug.msg('PushMessagesToRMQ/Invalid request found.');
+      end;
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('PushMessagesToRMQ ends.');
+  Except on E:Exception do
+    structdef.axprovider.dbm.gf.DoDebug.msg('Error in PushMessagesToRMQ :'+E.Message);
+  end;
+  finally
+    json_Request := nil;
+  end;
+end;
+
+
+end.

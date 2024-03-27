@@ -1,0 +1,4096 @@
+unit uAxfastRun;
+{Copied from Axpert9-XE3\Ver 11.0\Action_DBConn_Lost}
+{Copied from Axpert9-XE3\Ver 11.1}
+{Copied from Axpert9-XE3\Ver 11.2}
+interface
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, ExtCtrls, StdCtrls,frxClass,frxDBXComponents, ComCtrls, DateUtils, Menus, XMLDoc, XMLIntf,DB,
+  uAxprovider, Grids,frxExportPDF,frxBarcode,frxCross, frxOLE,frxGradient,frxChart,uXDS,uProfitEVAL,uStructdef,uStoredata,frxDesgn,
+  frxADOComponents,frxExportHTML,frxExportRTF,frxRich,uCompress,frxExportDOCX,frxDMPExport,ShellAPI,frxExportXLSX,StrUtils, System.IOUtils,
+  frxDsgnIntf,frxExportCSV, frxExportXLS, frxExportText,frxExportMail, frxExportXML, frxExportODF,frxHTML,
+  RegularExpressions,frxDBSet,Soap.EncdDecd,IdGlobal,Printers;
+
+Type
+  TSetStoreData=procedure (recid: Extended) of object;
+
+  TAxfastRun=class
+
+  Private
+    Embeddedfont,Output_Format,Errorstr :String;
+    Axp_VirtualPDFPrinter: String;
+    //bImageFromDB : Boolean;
+    frxPrimaryDataSet : TfrxDataSet;
+
+    Procedure GetOutputFormat;
+    function ReadFromDB(Whrstr: string): string;
+    procedure ValidateList(Strlist: TStringlist;Typ:string);
+    function ModifyHandleFile(RandomNo: Integer): String;
+    function FillCompanyParams(S: String): String;
+    function FillCompositeParams(S: String): String;
+    procedure frxReportExport(frxExportObj: TfrxCustomExportFilter);
+    function GetAxpImgPath: String;
+    function GetAxpImgServer: String;
+    function MapNetWorkDrive(AxpImgServer: String): String;
+    procedure frxPrepareReport(ClearLastFRreport: Boolean = True);
+    function IsReportHasFileServerImage: Boolean;
+    procedure SaveFastReportInToDB(TransId, RecordId, FRformat, FRpath,
+      FRfilename: String);
+    procedure ClearDuplicateFRXExportFilters;
+    procedure PrintReportToPDFPrinter(const Report: TfrxReport;
+      const PDFOutFilename: string);
+    function FillCompanyVars(S: String): String;
+    function FillCompositeVars(S: String): String;
+    function RemoveHTMLTags(S: String): String;
+	
+    //FastPrint | Dynamic Template creation
+    procedure BindMasterDataSource(pSQLText: String);
+    procedure SetFRObjectProps(pXDS : TXDS);
+    function FillDynamicParamWithQueryColumn(pContent: String;
+      pfrxComponent: TfrxComponent): String;
+    procedure AddReportToAxfast(pCaption, pTransid, pOutputFormat: String;pEmbeddedFonts:String='');
+    procedure InsertAxpertReports(pTemplateCaption: string);
+ 	  function FillDynamicParams(pInputStr: String): String;
+    procedure SetFrxViewHeight(pXDS: TXDS; pFieldName: String;
+      pFrxView: TFrxView);
+    procedure setFrxPageProperties(pXDS: TXDS; pfrxReportPage: TfrxReportPage);
+    procedure SetFRProps(pXDS: TXDS);
+    procedure BindDetailDataSource(pXDS:TXDS);
+    procedure CreateFrxMemo(Lf, tp, wid, ht: Double; FrmType, val, Talign,
+      Calign, ColHeadstr: string; MAutosize: boolean; parnt: TfrxComponent;bIsHeader : boolean = False);
+    function Setframe(st: String): TfrxFrameTypes;
+    procedure PrepareDetailData(pfrxHeaderData:TfrxHeader;pfrxDetailData: TfrxDetailData; pXDS: TXDS);
+    procedure SetFrxViewWidth(pXDS: TXDS; pFieldName: String;
+      pFrxView: TFrxView);
+    function GetFileUsingPattern(pFilePathWithPattern: String): string;
+
+    function EvalFRContent(pFRContent: String): String;
+    procedure PrepareDynamicContent;
+    function GetValue(pVName: String): String;
+    procedure SetFrxAppTitle(pfrxHTMLView: TfrxHtmlView;pXDS : TXDS);
+    procedure AssignPictureObjectEvent(ReportComponent: TfrxComponent);
+    procedure frxReportOnReportPrint(Sender: TfrxComponent);//PictureObjectBeforePrint(Sender: TObject; var Handled: Boolean);//PictureObjectBeforePrint(Sender: TfrxComponent);
+    //function QueryContainsField(Query: TfrxDBDataset; FieldName: string;Var bIsBlob : Boolean): Boolean;
+    procedure frxReport1BeforePrint(Sender: TfrxReportComponent);
+    function PrepareHTMLImgSrc(pFieldName: String): String;
+    procedure SetHTMLImgSrcForDynamicFields(pFrxHTMLView: TFrxHTMLView);
+    procedure AlignObjectsToTopWidth(Report: TfrxReport);
+    function IsTemplateCreatedThroughFastPrintForm: Boolean;
+
+  {implementation}
+  public
+    frxReport: TfrxReport;
+    frxDBXComponents:TfrxDBXComponents;
+    frxADOComponents: TfrxADOComponents;
+    frxExportPDF:TfrxPDFExport;
+    dbquery : TfrxDBXQuery;
+    adoquery :TfrxADOQuery;
+    frxBarcode:TfrxBarCodeObject;
+    frxOLEObject: TfrxOLEObject;
+    frxCrossObject: TfrxCrossObject;
+    frxGradientObject: TfrxGradientObject;
+    frxChartObject: TfrxChartObject;
+    frxHTMLExport: TfrxHTMLExport;
+    frxRTFExport: TfrxRTFExport;
+    frxRichObject:TfrxRichObject;
+    frxDocxExport:TfrxDocxExport;
+    frxDotMatrixExport: TfrxDotMatrixExport;
+    frxXLSXExport: TfrxXLSXExport;
+
+    frxXMLExport: TfrxXMLExport;
+    frxODTExport: TfrxODTExport;
+    frxSimpleTextExport: TfrxSimpleTextExport;
+    frxCSVExport: TfrxCSVExport;
+    frxMailExport: TfrxMailExport;
+    frxXLSExport: TfrxXLSExport;
+
+    Axpro1:TAxprovider;
+    storedata : TStoreData;
+    parser : TProfitEval;
+    Reportname,Output,fastpath,outfile:String;
+    Reclist,F_PrintFormList:TStringList;
+    SetRecid:TSetStoreData;
+    Structname :string;
+    DoFastPrint,ShowPrintDialogForPrint,SavefrToDB,exportfp3:Boolean;
+    SaveFastRepAsHtml, isScheduled : Boolean;
+    procedure connectAxfast;
+    Procedure PrintAxreport;
+    procedure SetParamValues;
+    procedure ReadFastReport(Whrstr,sfile, tfile: string); Overload;
+    procedure ReadFastReport(frTemplateName : String; ResultStm : TStringStream); overload;
+    procedure WriteFastReport(Whrstr, sfile, tfile: string);
+    constructor create(axpro:TAxprovider);
+    destructor destroy;override;
+
+    procedure DesignFastReport(pFormName,pSourceTemplateName,pTargetTemplateName : String);
+  end;
+
+implementation
+
+Const
+  cImageFieldPrefix = 'frximage_'; //will be used in the FastPrint config for images inside the content
+
+{ TAxfastRun }
+
+procedure TAxfastRun.connectAxfast;
+begin
+  frxReport:=TfrxReport.Create(nil);
+  frxExportPDF:=TfrxPDFExport.Create(nil);
+  frxBarcode:= TfrxBarCodeObject.Create(nil);
+  frxOLEObject:=TfrxOLEObject.Create(nil);
+  frxCrossObject:= TfrxCrossObject.Create(nil);
+  frxGradientObject:= TfrxGradientObject.Create(nil);
+  frxChartObject:= TfrxChartObject.Create(nil);
+  frxHTMLExport:= TfrxHTMLExport.Create(nil);
+  frxRTFExport := TfrxRTFExport.Create(nil);
+  frxDocxExport :=TfrxDocxExport.Create(nil);
+  frxDotMatrixExport:= TfrxDotMatrixExport.Create(nil);
+  frxXLSXExport := TfrxXLSXExport.Create(nil);
+
+  frxXMLExport:= TfrxXMLExport.Create(nil);
+  frxODTExport:= TfrxODTExport.Create(nil);
+  frxSimpleTextExport:= TfrxSimpleTextExport.Create(nil);
+  frxCSVExport:= TfrxCSVExport.Create(nil);
+  frxMailExport:= TfrxMailExport.Create(nil);
+  frxXLSExport:= TfrxXLSExport.Create(nil);
+  frxRichObject:=TfrxRichObject.Create(nil);
+  frxDBXComponents:=TfrxDBXComponents.Create(nil);                                // for Oracle
+  frxDBXComponents.DefaultDatabase:=axpro1.dbm.Connection.dbx;
+  dbquery:=TfrxDBXQuery.Create(nil);
+
+  frxADOComponents:=TfrxADOComponents.Create(nil);
+  frxADOComponents.DefaultDatabase:=axpro1.dbm.Connection.ado;                     // for Ms-Sql
+  adoquery:= TfrxADOQuery.Create(nil);
+  frxReport.EngineOptions.SilentMode:=true;
+  frxReport.EngineOptions.UseFileCache := True;
+  frxReport.PreviewOptions.PictureCacheInFile := true;
+end;
+
+constructor TAxfastRun.create(axpro: TAxprovider);
+begin
+
+ Axpro1:=Axpro;
+ parser := nil;
+ DoFastPrint:=false;
+ ShowPrintDialogForPrint := true;
+ SavefrToDB := false;
+ SaveFastRepAsHtml := False;
+ exportfp3 := false;
+ isScheduled := false;
+ frxPrimaryDataSet := nil;
+ connectAxfast;
+end;
+
+destructor TAxfastRun.destroy;
+begin
+  freeAndnil(frxReport);
+  freeAndnil(frxDBXComponents);
+  freeAndnil(frxExportPDF);
+  freeAndnil(frxBarcode);
+  freeAndnil(frxOLEObject);
+  freeAndnil(frxCrossObject);
+  freeAndnil(frxGradientObject);
+  freeAndnil(frxChartObject);
+  freeandnil(frxHTMLExport);
+  freeandnil(frxRTFExport);
+  freeandnil(frxRichObject);
+  freeandnil(frxDocxExport);
+  freeandnil(frxDotMatrixExport);
+  freeandnil(frxXLSXExport);
+
+  freeandnil(frxXMLExport);
+  freeandnil(frxODTExport);
+  freeandnil(frxSimpleTextExport);
+  freeandnil(frxCSVExport);
+  freeandnil(frxMailExport);
+  freeandnil(frxXLSExport);
+ inherited;
+end;
+
+
+Procedure TAxFastRun.SaveFastReportInToDB(TransId,RecordId,FRformat,FRpath,FRfilename : String);
+var
+  SQLStr,wCond : String;
+  QExds : TXDS;
+begin
+  //
+  if Not FileExists(FRpath+FRfilename) then
+    raise Exception.Create('Fastreport ('+FRfilename+') file does not exist.');
+
+  if Not Axpro1.TableFound('axfastdocs') then
+  begin
+    try
+      if Axpro1.dbm.Connection.DbType = 'oracle' then
+        SQLStr := 'create table axfastdocs(transid varchar2(5),recordid varchar2(16),frfilename varchar2(255),'+
+                  'frreport blob,blobno number(3),createdby varchar2(30),createdon date)'
+      else if Axpro1.dbm.Connection.DbType = 'ms sql' then
+        SQLStr := 'create table axfastdocs(transid varchar(5),recordid varchar(16),frfilename varchar(255),'+
+                  'frreport varbinary(MAX),blobno numeric(3),createdby varchar(30),createdon datetime)'
+      else if Axpro1.dbm.Connection.DbType = 'postgre' then
+        SQLStr := 'create table axfastdocs(transid varchar(5),recordid varchar(16),frfilename varchar(255),'+
+                  'frreport bytea,blobno numeric(3),createdby varchar(30),createdon timestamp)'
+      else if Axpro1.dbm.Connection.DbType = 'mysql' then
+        SQLStr := 'create table axfastdocs(transid varchar(5),recordid varchar(16),frfilename varchar(255),'+
+                  'frreport blob,blobno numeric(3),createdby varchar(30),createdon datetime)';
+      Axpro1.ExecSQL(SQLStr,'','',false);
+    Except on e:exception do
+      begin
+          Axpro1.dbm.gf.DoDebug.Log(Axpro1.dbm.gf.Axp_logstr+'\uAxFastRun\SaveFastReportInToDB - '+e.Message);
+          Axpro1.dbm.gf.doDebug.Msg('Firing SQL '+SQLStr+'. Error : '+E.Message);
+      end;
+    end;
+  end;
+  try
+    wCond := 'transid = ' + Quotedstr(transid) + 'and recordid= ' +
+          Quotedstr(recordid) + 'and frfilename= ' +
+          Quotedstr(FRfilename);
+    QExds := nil;
+    QExds := Axpro1.Dbm.GetXds(Nil);
+    QExds.Submit('transid', TransId, 'c');
+    QExds.Submit('recordid', RecordId, 'c');
+    QExds.Submit('frfilename', FRfilename, 'c');
+    QExds.Submit('createdon',(datetimetostr(Axpro1.dbm.getserverdatetime)), 'd');
+    QExds.Submit('createdby', Axpro1.dbm.gf.username, 'c');
+    QExds.AddOrEdit('axfastdocs',wCond);
+    QExds.close;
+    Axpro1.dbm.WriteBlob('frreport','axfastdocs',wCond, FRpath+FRfilename,true);
+  Except on e:exception do
+    begin
+        Axpro1.dbm.gf.DoDebug.Log(Axpro1.dbm.gf.Axp_logstr+'\uAxFastRun\SaveFastReportInToDB - '+e.Message);
+        Axpro1.dbm.gf.doDebug.Msg('Updating SaveFastReportInToDB. Error : '+E.Message);
+    end;
+  end;
+end;
+
+
+procedure TAxfastRun.PrintAxreport;
+var
+  where:string;
+  DataPage: TfrxDataPage;
+  i:integer;
+  filename,FileExtn,Template,Errorstr,Old_PrintForm,Old_Outputformat,pdf_password:string;
+  RnDPfname,handlefilename,CRecId:string;
+  Rn:Integer;
+  oldRecid : Extended;
+  Axp_FastReportWithRecID : Boolean;
+  VirtualPDFprinterErr : String;
+
+  stm_FR_template : TStringStream;
+begin
+ try
+   try
+     stm_FR_template := nil; //Stream object to hold FR Template
+     stm_FR_template := TStringStream.Create('',TEncoding.UTF8); //StringStream object creation
+     Errorstr:='';
+     CRecId := '';
+     VirtualPDFprinterErr := '';
+     Axp_FastReportWithRecID := False;
+     frxReport.Errors.Clear;
+     fastpath := Trim(axpro1.dbm.gf.FindAndReplace(fastpath,'\\','\'));
+     if not DirectoryExists(fastpath) then ForceDirectories(fastpath);
+     if (assigned(Reclist) and (Reclist.Count>0)) then begin
+        ValidateList(Reclist,'recordid');
+        Old_PrintForm:='';                   // All rows selected (Composite reports)
+        OldRecid := 0;
+        for i := 0 to Reclist.Count - 1 do begin
+          if OldRecid <> strtofloat(Reclist[i]) then
+            SetRecid(strtofloat(Reclist[i]));
+          OldRecid := strtofloat(Reclist[i]);
+          if Assigned(F_PrintFormList) and (F_PrintFormList.Count>0) then begin
+             ValidateList(F_PrintFormList,'report');
+             Reportname:=Trim(Lowercase(F_PrintFormList[i]));
+              Axpro1.dbm.gf.DoDebug.Msg('Multiple printdocument - '+Reportname);
+             if Reportname <> Old_PrintForm then begin
+               GetOutputFormat;
+               if Old_Outputformat <> '' then begin
+                  if Old_Outputformat<> Output_Format then
+                    raise Exception.Create(' The Selected Print Documents should have similar output format. ');
+               end;
+               Old_Outputformat:=Output_Format;
+               Old_PrintForm:= Reportname;
+               //Stream used instead of file handling , but old functionalities are available still
+               (*
+               where:=Axpro1.dbm.gf.SQLLower+'(caption) = '+Lowercase(quotedStr(Reportname));
+               Template:=ReadFromDB(where);
+               frxReport.LoadFromFile(Template);
+               *)
+               //ReadFastReport method writes Fastreport Template Data into stm_FR_template object
+               ReadFastReport(Reportname,stm_FR_template);
+               frxReport.LoadFromStream(stm_FR_template);
+             end;
+          end
+          else if Old_PrintForm <> Reportname then begin
+            Old_PrintForm:= Reportname;
+            //Stream used instead of file handling , but old functionalities are available still
+            (*
+            where:=Axpro1.dbm.gf.SQLLower+'(caption) = '+Lowercase(quotedStr(Reportname));
+            Template:=ReadFromDB(where);
+            frxReport.LoadFromFile(Template);
+            *)
+            //ReadFastReport method writes Fastreport Template Data into stm_FR_template object
+            ReadFastReport(Reportname,stm_FR_template);
+            frxReport.LoadFromStream(stm_FR_template);
+          end;
+          SetParamValues;
+          frxPrepareReport(false);//frxReport.PrepareReport(false);
+        end;
+     end
+     else begin
+        //Stream used instead of file handling , but old functionalities are available still
+        (*
+        where:=Axpro1.dbm.gf.SQLLower+'(caption) = '+Lowercase(quotedStr(Reportname));
+        Template:=ReadFromDB(where);
+        frxReport.LoadFromFile(Template);
+        *)
+        //ReadFastReport method writes Fastreport Template Data into stm_FR_template object
+        ReadFastReport(Reportname,stm_FR_template);
+        frxReport.LoadFromStream(stm_FR_template);
+        axpro1.dbm.gf.DoDebug.Msg(Reportname+' is loaded from axpertreports');
+        SetParamValues;
+        frxPrepareReport();//frxReport.PrepareReport();
+     end;
+      if frxReport.Errors.Text<>'' then  raise Exception.Create(frxReport.Errors.Text);
+      if exportfp3 then // if exportfp3 file true the fastreport prepared file will be exported
+      begin
+        fastpath :=  axpro1.dbm.gf.FrPrintPath;
+        FileExtn := '';
+        outfile := ExtractFileName(outfile);
+        FileExtn := ExtractFileExt(outfile);
+        if FileExtn <> '' then
+          Delete(outfile,length(outfile)-length(FileExtn)+1,length(FileExtn));
+        CRecId := '';
+        if storedata.LastSavedRecordId <> 0 then // If its not a new transaction
+           CRecId := FloattoStr(storedata.LastSavedRecordId);
+        if CRecId <> '' then
+          outfile := axpro1.dbm.gf.username+'_'+CRecId+'_'+outfile+'.fp3'
+        else
+          outfile := axpro1.dbm.gf.username+'_'+outfile+'.fp3';
+        if axpro1.dbm.gf.ClientIP <> '' then outfile := axpro1.dbm.gf.ClientIP+'-'+outfile;
+        frxReport.PreviewPages.SaveToFile(fastpath+outfile); //Exporting fastreport prepared file (fp3)
+        Exit;
+      end;
+      if SaveFastRepAsHtml then
+        Output_Format := 'html'
+      else begin
+        if (Output_Format='') or (isScheduled) then
+          GetOutputFormat;
+      end;
+      if ((DoFastPrint) and (Lowercase(Trim(Output_Format)) <>'dos')) then begin
+        frxReport.PrintOptions.ShowDialog:= ShowPrintDialogForPrint;//true;
+        frxReport.Print;
+      end
+      else begin
+        FileExtn :=Lowercase(ExtractFileExt(trim(outfile)));
+        if copy(FileExtn,1,1) = '.' then FileExtn := Copy(FileExtn,2,length(FileExtn));
+        if (FileExtn <> Output_Format) and (FileExtn <> 'doc') and (Output_Format<>'msword') then
+          FileExtn := '';
+        axpro1.dbm.gf.DoDebug.Msg('Output Format :'+Output_Format);
+        axpro1.dbm.gf.DoDebug.Msg('Embeddedfont :'+Embeddedfont);
+        filename :=extractfilename(trim(outfile));
+        (* AXP_FASTREPORTWITHRECID Variable needs to be set to 't' or 'true' for creating FR filename with recordid
+           if AXP_FASTREPORTWITHRECID is true / t then the file will be created with <recordid>+'-'+filename
+        *)
+        if assigned(parser) then Axp_FastReportWithRecID :=
+          (Lowercase(parser.GetVarValue('axp_fastreportwithrecid')) = 't') or
+          (Lowercase(parser.GetVarValue('axp_fastreportwithrecid')) = 'true');
+        if Axp_FastReportWithRecID then
+        begin
+          if storedata.LastSavedRecordId <> 0 then // If its not a new transaction
+          begin
+            CRecId := FloattoStr(storedata.LastSavedRecordId);
+            if Trim(filename) <> '' then
+              filename := CRecId + '-' + filename
+            else
+              Reportname := CRecId + '-' + Reportname;
+          end;
+        end;
+        if ((Lowercase(Trim(Output_Format))='pdf') or (Lowercase(Trim(Output_Format))='')) then begin
+          if trim(filename)<>'' then
+          begin
+            if FileExtn<>'' then
+               frxExportPDF.FileName := filename
+            else
+            begin
+              filename := TPath.GetFileNameWithoutExtension(filename);
+              frxExportPDF.FileName := filename+'.pdf';
+              if axpro1.dbm.gf.IsService then
+              begin
+               if copy(fastpath,1,2) = '\\' then
+               begin
+                 fastpath := Trim(axpro1.dbm.gf.FindAndReplace(fastpath,'\\','\'));
+                 fastpath := '\'+fastpath;
+               end else
+                 fastpath := axpro1.dbm.gf.FindAndReplace(fastpath,'\\','\');
+               if copy(fastpath, length(fastpath), 1) = '\' then
+                  delete(fastpath,length(fastpath), 1);
+               if lowercase(copy(fastpath, length(fastpath)-2, 3)) = 'pdf' then
+               begin
+                  fastpath := fastpath + '\' ;
+                  if not DirectoryExists(fastpath) then
+                     ForceDirectories(fastpath);
+               end else begin
+                fastpath := fastpath+'\pdf\';
+                ForceDirectories(fastpath);
+               end;
+              end;
+            end;
+          end
+          else
+            frxExportPDF.FileName := Reportname+'.pdf';
+          outfile := frxExportPDF.FileName;
+          frxExportPDF.DefaultPath:= fastpath;
+          frxExportPDF.ShowProgress:=false;
+          frxExportPDF.ShowDialog:=false;
+          if Lowercase(Trim(Embeddedfont))='t' then
+            frxExportPDF.EmbeddedFonts:=true
+          else
+            frxExportPDF.EmbeddedFonts:=false;
+          pdf_password := trim(storedata.GetFieldValue('pdf_password',1));
+          if pdf_password<>'' then
+            frxExportPDF.UserPassword :=pdf_password;
+
+          frxExportPDF.Compressed:=true;
+          frxExportPDF.Quality:=30;
+          frxExportPDF.PrintOptimized:=true;
+          frxExportPDF.Background := true; // to enable background picture option.Background picture option is available only for PDF & HTML
+          axpro1.dbm.gf.DoDebug.Msg('Checking for Axp_VirtualPDFPrinter ...');
+          Axp_VirtualPDFPrinter := Parser.GetVarValue('Axp_VirtualPDFPrinter');
+          if lowercase(Axp_VirtualPDFPrinter) = 'axp_virtualpdfprinter' then
+             Axp_VirtualPDFPrinter := '';
+          axpro1.dbm.gf.DoDebug.Msg('Axp_VirtualPDFPrinter '+Axp_VirtualPDFPrinter);
+          if Axp_VirtualPDFPrinter <> '' then
+          begin
+            try
+              axpro1.dbm.gf.DoDebug.Msg('Calling PrintReportToPDFPrinter...');
+              //pdf_password may not work in this case
+              PrintReportToPDFPrinter(frxReport, fastpath+outfile);
+            except on e:exception do
+            begin
+              VirtualPDFprinterErr := e.Message;
+              axpro1.dbm.gf.DoDebug.Msg('Error in PrintReportToPDFPrinter '+VirtualPDFprinterErr);
+            end;
+            end;
+          end
+          else
+          begin
+            axpro1.dbm.gf.DoDebug.Msg('Calling frxReportExport...');
+            frxReportExport(frxExportPDF);//frxReport.Export(frxExportPDF);
+          end;
+
+          if VirtualPDFprinterErr <> '' then //if err with virtual printer then user FR PDF export.
+          begin
+            axpro1.dbm.gf.DoDebug.Msg('Calling frxReportExport due to virtual printer error...');
+            frxReportExport(frxExportPDF);//frxReport.Export(frxExportPDF);
+          end;
+          axpro1.dbm.gf.DoDebug.Msg('PDF Exported');
+        end
+        else if Lowercase(Trim(Output_Format))='msword' then begin
+          if trim(filename)<>'' then begin
+            if FileExtn<>'' then begin
+              filename := copy(filename,1,pos('.',filename)-1);
+            end;
+            frxRTFExport.FileName := filename+'.doc'
+          end
+          else
+            frxRTFExport.FileName := Reportname+'.doc';
+          outfile := frxRTFExport.FileName;
+          frxRTFExport.DefaultPath:= fastpath;
+          frxRTFExport.ShowProgress:=false;
+          frxRTFExport.ShowDialog:=false;
+          frxRTFExport.SuppressPageHeadersFooters:=true;
+          frxRTFExport.HeaderFooterMode:=hfPrint;
+          frxReportExport(frxRTFExport);//frxReport.Export(frxRTFExport);
+          axpro1.dbm.gf.DoDebug.Msg('Ms-word Exported');
+        end
+        else if Lowercase(Trim(Output_Format))='docx' then begin
+          if trim(filename)<>'' then begin
+            if FileExtn<>'' then begin
+              filename := copy(filename,1,pos('.',filename)-1);
+            end;
+            frxDocxExport.FileName := filename+'.docx'
+          end
+          else
+            frxDocxExport.FileName := Reportname+'.docx';
+          outfile := frxDocxExport.FileName;
+          frxDocxExport.DefaultPath:= fastpath;
+          frxDocxExport.ShowProgress:=false;
+          frxDocxExport.ShowDialog:=false;
+          frxReportExport(frxDocxExport);//frxReport.Export(frxDocxExport);
+          axpro1.dbm.gf.DoDebug.Msg('Docx Exported');
+        end
+        else if Lowercase(Trim(Output_Format))='html' then begin
+          if axpro1.dbm.gf.IsService then
+          begin
+            if copy(fastpath,1,2) = '\\' then
+            begin
+              fastpath := Trim(axpro1.dbm.gf.FindAndReplace(fastpath,'\\','\'));
+              fastpath := '\'+fastpath;
+            end else
+              fastpath := axpro1.dbm.gf.FindAndReplace(fastpath,'\\','\');
+          end;
+          if trim(filename)<>'' then begin
+            if FileExtn<>'' then
+              frxHTMLExport.FileName := filename
+            else
+              frxHTMLExport.FileName := filename+'.html'
+          end
+          else
+            frxHTMLExport.FileName := Reportname+'.html';
+          outfile := frxHTMLExport.FileName;
+          frxHTMLExport.DefaultPath:= fastpath;
+          frxHTMLExport.ShowProgress:=false;
+          frxHTMLExport.ShowDialog:=false;
+          frxHTMLExport.Background := true;  // to enable background picture option.Background picture option is available only for PDF & HTML
+          frxReportExport(frxHTMLExport);//frxReport.Export(frxHTMLExport);
+          axpro1.dbm.gf.DoDebug.Msg('HTML Exported');
+        end
+        else if Lowercase(Trim(Output_Format))='dos' then begin
+          Outfile:= '';
+          if not DoFastPrint then begin
+            frxReport.PreviewOptions.Buttons := [pbPrint,pbSave,pbExport,pbZoom,pbFind,pbOutline,pbTools,pbNavigator,pbExportQuick];
+            ClearDuplicateFRXExportFilters;
+            frxReport.ShowPreparedReport;
+            axpro1.dbm.gf.DoDebug.Msg('DOS Preview created.');
+          end
+          else begin
+            frxDotMatrixExport.ShowDialog:=false;                                // Dot matrix print introduced in FastReport
+            frxDotMatrixExport.ShowProgress:=false;
+            Rn:=Random(99);
+            RnDPfname:=Axpro1.dbm.gf.StartPath+'\'+'DPfile'+InttoStr(Rn)+'.txt';
+            frxDotMatrixExport.FileName :=RnDPfname;
+            frxDotMatrixExport.SaveToFile:=true;
+            frxDotMatrixExport.PageBreaks:=False;
+            frxReportExport(frxDotMatrixExport);//frxReport.Export(frxDotMatrixExport);
+            axpro1.dbm.gf.DoDebug.Msg('DOS Exported');
+            handlefilename := ModifyHandleFile(Rn);
+            SetCurrentDir(Axpro1.dbm.gf.StartPath);
+            if handlefilename <> '' then
+              ShellExecute(Application.Handle,'open',PChar(handlefilename),nil,nil,SW_HIDE)
+            else
+              raise Exception.Create('Unable to find ''Handle.bat'' file.');
+
+          end;
+        end
+        else if Lowercase(Trim(Output_Format))='xlsx' then begin
+          if trim(filename)<>'' then begin
+            if FileExtn<>'' then
+              frxXLSXExport.FileName := filename
+            else
+              frxXLSXExport.FileName := filename+'.xlsx'
+          end
+          else
+            frxXLSXExport.FileName := Reportname+'.xlsx';
+          outfile := frxXLSXExport.FileName;
+          frxXLSXExport.DefaultPath:= fastpath;
+          frxXLSXExport.ShowProgress:=false;
+          frxXLSXExport.ShowDialog:=false;
+          frxXLSXExport.EmptyLines:= True;  // Export Empty lines
+          frxXLSXExport.ExportPageBreaks:= True; // Export PageBreaks
+          frxXLSXExport.Wysiwyg:=False;            // For Proper Alignment from FastReport
+          frxReportExport(frxXLSXExport);//frxReport.Export(frxXLSXExport);
+          axpro1.dbm.gf.DoDebug.Msg('XLSX Exported');
+         end;
+      end;
+      if FileExists(Template) then DeleteFile(Template);
+      axpro1.dbm.gf.DoDebug.Msg('Outfile: '+outfile);
+      if SavefrToDB then
+         SaveFastReportInToDB(StructName,FloattoStr(Storedata.LastSavedRecordId),Output_Format,fastpath,outfile{Reportname}); //outfile
+   except on E : Exception do
+   begin
+     Errorstr:=e.message;
+	 Axpro1.dbm.gf.DoDebug.Log(DateTimeToStr(Now) + ': '+Axpro1.dbm.gf.Axp_logstr+'\uAxFastRun\PrintAxreport - '+Errorstr);
+   end; 
+   end;
+ finally
+   (*
+   The finally clause is always executed, regardless of how the try clause terminates,
+   Destroy of stream object added in the finally clause, this will avoid Redundant code
+   *)
+   if Assigned(stm_FR_template) then
+    FreeAndNil(stm_FR_template);
+   //Raise Execption
+   if Errorstr<>'' then begin
+     if FileExists(Template) then DeleteFile(Template);
+     axpro1.dbm.gf.DoDebug.Msg('Exeception on  : '+Errorstr);
+     raise Exception.Create(Errorstr);
+   end;
+ end;
+end;
+
+
+(*
+  This procedure is used to Clear the Duplicate FRXExportFilters from the FRX Report Preview.
+
+  FR not handled to avoid Duplicate Export Filters.
+  Drag Dropped Export Filters [like frxPDFExport1 , frxDOCXExport1 ,...etc.,] will be added into the report,
+  when the Form / Data module gets created .
+  So whenever we load viewframe object, FrxExportFilters are getting added into the Report.
+  There is no Duplicate check frxclasses.So, FrxExportFilters are getting duplicated everytime.
+  Refer [TfrxExportFilterCollection.Register Method in frxDsgnIntf Object]
+*)
+procedure TAxfastRun.ClearDuplicateFRXExportFilters;
+var
+  ExportFilterCollection : TfrxExportFilterCollection;
+  i: Integer;
+Const
+  ExportFiltersCount = 9; //Total no.of Export filters used in this object (AxFastRun)
+  (*
+  ExportFilters used in the object :
+    frxXMLExport1,frxODTExport1,frxPDFExport1,frxHTMLExport1,
+    frxSimpleTextExport1,frxCSVExport1,frxXLSExport1,frxXLSXExport1,
+    frxDOCXExport1.
+    Along with this by default Preparedreport Export option will come.
+  *)
+begin
+  //Calling frxExportFilters (frxDsgnIntf Object) to get ExportFilterCollections
+  ExportFilterCollection :=   frxExportFilters;
+  i := ExportFilterCollection.Count - 1;
+  while i > ExportFiltersCount do
+  begin
+    ExportFilterCollection.Items[i].Free;
+    i := ExportFilterCollection.Count - 1;
+  end;
+
+end;
+
+//IsTemplateCreatedThroughFastPrintForm
+(*
+Checking in the table can be avoided by intoducing a flag field in axfastlink table
+to identify the report created through FastPrint forms
+*)
+Function TAxfastRun.IsTemplateCreatedThroughFastPrintForm:Boolean;
+var
+  QXds : TXDS;
+begin
+  Axpro1.dbm.gf.DoDebug.Msg('IsTemplateCreatedThroughFastPrintForm starts... ');
+  Result := False;
+  QXds := nil;
+  try
+    try
+      QXds := Axpro1.dbm.GetXDS(nil);
+      QXds.buffered := True;
+      QXds.CDS.CommandText := 'select * from ax_configure_fast_prints where lower(form_name)='+QuotedStr(lowercase(structname))+' and '+
+                              ' lower(template_name)='+QuotedStr(Lowercase(Reportname));
+      QXds.open;
+      Result := Not QXds.cds.IsEmpty;
+      Axpro1.dbm.gf.DoDebug.Msg('IsTemplateCreatedThroughFastPrintForm ends. ');
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in IsTemplateCreatedThroughFastPrintForm '+E.Message);
+    end;
+  finally
+    if Assigned(QXds) then
+      FreeAndNil(QXds);
+  end;
+end;
+
+
+procedure TAxfastRun.frxPrepareReport(ClearLastFRreport: Boolean = True);
+var
+  AxpertImgPath,AxpImgServer : String;
+Begin
+  axpro1.dbm.gf.DoDebug.Msg('frx PrepareReoprt executing.');
+
+  //if the report is created through fastprint | do check here then call AssignPictureObjectEvent
+  If IsTemplateCreatedThroughFastPrintForm then
+    AssignPictureObjectEvent(frxReport);
+  AxpImgServer := GetAxpImgServer;
+  if (AxpImgServer <> '') and (axpro1.dbm.gf.sMapUserName <> '') and (axpro1.dbm.gf.sMapPassword <> '') and (IsReportHasFileServerImage) then
+     AxpertImgPath := MapNetWorkDrive(AxpImgServer);
+  if ClearLastFRreport then
+     frxReport.PrepareReport()
+  else
+     frxReport.PrepareReport(false);
+  if AxpertImgPath <> '' then
+    axpro1.dbm.gf.DisconnectMap(AxpertImgPath);
+  axpro1.dbm.gf.DoDebug.Msg('frx PrepareReoprt ends.');
+End;
+
+
+procedure TAxfastRun.frxReportExport(frxExportObj : TfrxCustomExportFilter);
+var
+  AxpImgServer,AxpertImgPath,AxpImagePath : String;
+Begin
+  axpro1.dbm.gf.DoDebug.Msg('frx ExportReoprt executing.');
+  AxpImgServer := GetAxpImgServer;
+  if (AxpImgServer <> '') and (axpro1.dbm.gf.sMapUserName <> '') and (axpro1.dbm.gf.sMapPassword <> '') and (IsReportHasFileServerImage) then
+     AxpertImgPath := MapNetWorkDrive(AxpImgServer);
+  frxReport.Export(frxExportObj);
+  if AxpertImgPath <> '' then
+    axpro1.dbm.gf.DisconnectMap(AxpertImgPath);
+  axpro1.dbm.gf.DoDebug.Msg('frx ExportReoprt ends.');
+End;
+
+
+Function TAxfastRun.MapNetWorkDrive(AxpImgServer : String):String;
+var
+  AxpImgPath,AxpImagePath : String;
+begin
+  axpro1.dbm.gf.DoDebug.Msg('MapNetWorkDrive executing.');
+  result := '';
+  if storedata.structdef.HasImgPath then
+     AxpImagePath := AxpImgServer
+  else
+     AxpImagePath := AxpImgServer+GetAxpImgPath;
+  If Not axpro1.dbm.gf.IsAccessiblePath(AxpImagePath) Then
+    Raise Exception.Create('You do not have the access for the path which is used in the report.');
+  result := AxpImagePath;
+  axpro1.dbm.gf.DoDebug.Msg('MapNetWorkDrive execution ends.');
+end;
+
+
+
+Function TAxfastRun.GetAxpImgServer:String;
+begin
+  Result := '';
+  if Not assigned(parser) then Exit;
+  Result := Trim(Parser.GetVarValue('AxpImageServer'));
+  if (Result <> '') then begin
+    if (Copy(Result,Length(Result),1) <> '\') then
+      Result := Result+'\';
+  end;
+end;
+
+
+Function TAxfastRun.GetAxpImgPath:String;
+begin
+  Result := '';
+  if Not assigned(parser) then Exit;
+  if storedata.structdef.HasImgPath then
+    Result := ''
+  else begin
+    Result := Parser.GetVarValue('AxpImagePath');
+    if (Result <> '') and (Copy(Result,Length(Result),1) <> '\') then
+      Result := Result+'\';
+  end;
+end;
+
+
+Function TAxfastRun.IsReportHasFileServerImage:Boolean;
+var
+  x1:TXds;
+  hasserverimage , ErrMsg : string;
+begin
+   result := false;
+   ErrMsg := '';
+   try
+     if not Axpro1.FieldFound('hasserverimage','Axfastlink') then begin
+       Axpro1.CreateField('Axfastlink','hasserverimage','C',5,0);
+       Axpro1.dbm.gf.DoDebug.Msg('HasServerImage field created in Axfastlink');
+       Exit;
+     end;
+     x1 :=axpro1.dbm.getxds(nil);
+     x1.buffered :=true;
+     x1.CDS.CommandText :='Select hasserverimage from Axfastlink where Caption=:caption and transid =:transid';
+     x1.CDS.Params.ParamValues['caption'] :=lowercase(Reportname);
+     x1.CDS.Params.ParamValues['transid'] :=lowercase(structname);
+     x1.open;
+     if not x1.CDS.Eof then begin
+       hasserverimage :=   LowerCase(x1.CDS.FieldByName('hasserverimage').AsString);
+       result := (hasserverimage = 't') or (hasserverimage = 'true');
+     end;
+     x1.close;
+   except on e:Exception do
+     ErrMsg := e.Message;
+   end;
+   if ErrMsg <> '' then axpro1.dbm.gf.DoDebug.Msg(ErrMsg);
+   if assigned(x1) then freeandnil(x1);
+end;
+
+
+procedure TAxfastRun.SetParamValues;
+var
+  i,cnt,j:Integer;
+  paramname,paramvalue,s,s1:string;
+  frxMemo : TfrxMemoView;
+  rtf_text : TfrxRichView;
+  HTMLView : TfrxHTMLView;
+begin
+  axpro1.dbm.gf.DoDebug.Msg('Calling PrepareDynamicContent...');
+  PrepareDynamicContent;
+  axpro1.dbm.gf.DoDebug.Msg('Assign Params Values to the Report Sql');
+  for i :=  0 to frxReport.ComponentCount-1 do begin
+    if frxReport.Components[i].ClassType = TfrxMemoView then begin
+       frxMemo := TfrxMemoView(frxReport.Components[i]);
+       s := trim(frxMemo.Name);
+       s1 := storedata.GetFieldValue(s,1);
+       if s1 <> '' then
+       begin
+          if pos('&nbsp;',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'&nbsp;',' ');
+          s1 := FillCompanyVars(s1);
+          {
+          if pos('<br />',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'<br />','');
+          if pos('<strong>',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'<strong>','');
+          if pos('</strong>',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'</strong>','');
+          }
+          s1 := RemoveHTMLTags(s1);
+          frxMemo.Memo.Text := s1;
+       end;
+    end else if frxReport.Components[i].ClassType = TfrxRichView then begin
+       rtf_text := TfrxRichView(frxReport.Components[i]);
+       s := trim(rtf_text.Name);
+       s1 := storedata.GetFieldValue(s,1);
+       if s1 <> '' then
+       begin
+          if pos('&nbsp;',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'&nbsp;',' ');
+          s1 := FillCompanyVars(s1);
+          {
+          if pos('<br />',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'<br />','');
+          if pos('<strong>',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'<strong>','');
+          if pos('</strong>',s1) > 0  then s1 := axpro1.dbm.gf.FindAndReplace(s1,'</strong>','');
+          }
+          s1 := RemoveHTMLTags(s1);
+          rtf_text.RichEdit.Lines.Text := s1;
+       end;
+    end
+    else if frxReport.Components[i].ClassType = TfrxHTMLView then begin
+       HTMLView := TfrxHTMLView(frxReport.Components[i]);
+       s := trim(HTMLView.Name);
+       s1 := HTMLView.HtmlViewer.Text;
+       if s1 <> '' then
+       begin
+          //s1 := FillCompanyVars(s1);
+          s1 := FillDynamicParams(s1);
+          HTMLView.HtmlViewer.Text := s1;
+       end;
+    end else if frxReport.Components[i].ClassType = TfrxDBXQuery then begin
+      dbquery := TfrxDBXQuery(frxReport.Components[i]);
+      axpro1.dbm.gf.DoDebug.Msg('DBX Report SQL Text : '+dbquery.SQL.Text);
+      dbquery.SQL.Text := FillCompanyParams(trim(dbquery.SQL.Text));
+      for cnt := 0 to dbquery.Params.count -1 do begin
+         Paramname := dbquery.Params[cnt].Name;
+         if trim(dbquery.Params[cnt].Expression)<>'' then   // if the param has expression then it will be omitted..
+           continue;
+         //Option to give recordid as parameter in the sql
+         if lowercase(Paramname) = 'recordid' then
+          Paramvalue := FloattoStr(storedata.LastSavedRecordId)
+         else
+          Paramvalue:=storedata.GetFieldValue(Paramname,1);
+         if (dbquery.ParamByName(paramname).DataType = ftDateTime) and (trim(paramvalue) <> '') then
+         begin
+          Try
+            dbquery.ParamByName(paramname).Value := StrToDateTime(axpro1.dbm.gf.ConvertToDBDateTime(axpro1.dbm.gf.dbdatestring, StrToDateTime(paramvalue)));
+          Except
+            dbquery.ParamByName(paramname).Value := paramvalue;
+          End;
+         end
+         else
+          dbquery.ParamByName(paramname).Value := paramvalue;
+         if dbquery.ParamByName(paramname).DataType = ftString then
+          dbquery.ParamByName(paramname).DataType := ftWideString;
+         axpro1.dbm.gf.DoDebug.Msg(paramname+' : '+paramvalue);
+      end;
+      dbquery.Close;
+    end
+    else if frxReport.Components[i].ClassType = TfrxADOQuery then begin
+      adoquery := Tfrxadoquery(frxReport.Components[i]);
+      axpro1.dbm.gf.DoDebug.Msg('ADO Report SQL Text : '+adoquery.SQL.Text);
+      adoquery.SQL.Text := FillCompanyParams(trim(adoquery.SQL.Text));
+      for cnt := 0 to adoquery.Params.count -1 do begin
+         Paramname := adoquery.Params[cnt].Name;
+         if trim(adoquery.Params[cnt].Expression)<>'' then   // if the param has expression then it will be omitted..
+           continue;
+         //Option to give recordid as parameter in the sql
+         if lowercase(Paramname) = 'recordid' then
+          Paramvalue := FloattoStr(storedata.LastSavedRecordId)
+         else
+          Paramvalue:=storedata.GetFieldValue(Paramname,1);
+         if adoquery.ParamByName(paramname).DataType = ftString then
+          adoquery.ParamByName(paramname).DataType := ftWideString
+         else if (adoquery.ParamByName(paramname).DataType = ftDateTime) and (trim(paramvalue) <> '') then
+         begin
+          Try
+            adoquery.ParamByName(paramname).Value := StrToDateTime(axpro1.dbm.gf.ConvertToDBDateTime(axpro1.dbm.gf.dbdatestring, StrToDateTime(paramvalue)));
+          Except
+            adoquery.ParamByName(paramname).Value := paramvalue;
+          End;
+         end
+         else
+          adoquery.ParamByName(paramname).Value := paramvalue;
+         axpro1.dbm.gf.DoDebug.Msg(paramname+' : '+paramvalue);
+      end;
+      adoquery.Close;
+    end;
+  end;
+  axpro1.dbm.gf.DoDebug.Msg('Assign Params Completed');
+end;
+
+function TAxfastRun.FillCompanyParams(S: String): String;
+Var
+  p1, p2, p,rc,i: integer;
+  CName, CValue, LastDataType,tempsql,val: String;
+  fld1 : pfld;
+Begin
+  try
+    tempsql := s;
+    While true Do Begin
+      p1 := pos('{', S);
+      If p1 = 0 Then break;
+      p2 := pos('}', S);
+      If p2 = 0 Then
+        Raise EDataBaseError.Create('Invalid SQL');
+      CName := Trim(Copy(S, p1 + 1, p2 - p1 - 1));
+      if copy(cName,Length(cName),1) = '*' then begin
+        Delete(cName,Length(cName),1);
+        fld1 := pfld(storedata.structdef.GetField(cname));
+        if pfrm(storedata.structdef.frames[fld1.FrameNo-1]).AsGrid then begin
+          rc := Storedata.GetRowCount(fld1.FrameNo);
+          cValue := '';
+          for i := 1 to rc do begin
+            val := Storedata.GetFieldValue(Cname, i);
+            if (i = 1) then
+              LastDataType := uppercase(fld1.DataType);
+            If (LastDataType = 'N') then begin
+              if (val = '') Then val := '0' else val := axpro1.dbm.gf.RemoveCommas(val);
+              cValue := cValue+','+ val;
+            end else
+              cValue := cValue+','+ quotedstr(val);
+          end;
+          Delete(cValue,1,1);
+          if cValue = '' then
+          begin
+            if fld1.DataType = 'n' then
+              cvalue := '0'
+            else
+              cValue := QuotedStr(cValue);
+          end;
+  //        if cValue = '' then cValue := quotedstr('');
+        end else CValue := Storedata.GetFieldValue(Cname, 1);
+      end else begin
+        fld1 := pfld(storedata.structdef.GetField(cname));
+        CValue := Storedata.GetFieldValue(Cname, 1);
+        LastDataType := uppercase(fld1.DataType);
+        If (LastDataType = 'N') then begin
+          if (CValue = '') Then CValue := '0' else CValue := axpro1.dbm.gf.RemoveCommas(CValue);
+        end;
+      end;
+      axpro1.dbm.gf.DoDebug.msg(CName + ' = ' + CValue);
+      Delete(S, p1, p2 - p1 + 1);
+      Insert(CValue, S, p1);
+    End;
+//    S := FillCompositeParams(S);
+    result := s;
+  except on e:exception do
+    result := tempsql;
+  end;
+End;
+
+Function TAxfastRun.FillCompositeParams(S: String): String;
+Var
+  p1,tp1, p2, p: integer;
+  CName, CValue, fname: String;
+Begin
+  p1 := pos('(:', S);
+  While p1 > 0 Do Begin
+    p2 := pos(')', copy(S,p1+1,20000));
+    p2 := p1+p2;
+    CName := Copy(S, p1 + 2, p2 - p1 - 2);
+    CValue := '(' + Storedata.GetFieldValue(CName, -1) + ')';
+    If cValue = '()' Then cValue := '('' '')';
+    axpro1.dbm.gf.DoDebug.msg(CName + ' = ' + CValue);
+    Delete(S, p1, p2 - p1 + 1);
+    Insert(CValue, S, p1);
+    p1 := pos('(:', S);
+  End;
+  Result := S;
+End;
+
+
+Procedure TAxfastRun.GetOutputFormat;
+var x1:Txds;
+begin
+  Output_Format :='';
+  Embeddedfont :='';
+  if structname<>'' then begin
+   x1 := Axpro1.dbm.GetXDS(nil);
+   x1.buffered :=true;
+   try
+     Errorstr :='';
+     x1.CDS.CommandText := 'Select TRANSID,CAPTION,OUTPUT,EFONT From Axfastlink where '
+                            +Axpro1.dbm.gf.SQLLower+'(transid) =:transid and '+Axpro1.dbm.gf.SQLLower+'(caption) =:caption';
+     x1.CDS.Params.ParamValues['transid'] :=lowercase(trim(structname));
+     x1.CDS.Params.ParamValues['caption'] :=lowercase(trim(Reportname));
+     x1.open;
+   Except on E:Exception do
+    Errorstr :=E.Message;
+   end;
+   if Errorstr<> '' then begin
+     Axpro1.dbm.gf.DoDebug.Msg('Error in GetOutputFormat :'+Errorstr);
+     if not Axpro1.FieldFound('Axfastlink','OUTPUT') then begin
+       Axpro1.CreateField('Axfastlink','OUTPUT','C',50,0);
+       Axpro1.dbm.gf.DoDebug.Msg('Output field created in Axfastlink');
+     end;
+     if not Axpro1.FieldFound('Axfastlink','EFONT') then begin
+       Axpro1.CreateField('Axfastlink','EFONT','C',1,0);
+       Axpro1.dbm.gf.DoDebug.Msg('EFONT field created in Axfastlink');
+     end;
+     x1.open;
+   end;
+   while not x1.CDS.Eof do begin
+      Output_Format:=x1.CDS.FieldByName('output').AsString;
+      Embeddedfont :=x1.CDS.FieldByName('Efont').AsString;
+      x1.CDS.Next;
+    end;
+    x1.close;
+  end;
+  if assigned(x1) then freeandnil(x1);
+end;
+
+function TAxfastRun.ReadFromDB(Whrstr:string):string;
+var frxpath,sfile,tfile,Errorstr:string;
+begin
+ try
+   result:='';
+   frxpath :=fastpath+'frxtemp';
+   if not DirectoryExists(frxpath) then ForceDirectories(frxpath);
+   tfile:=frxpath+'\'+Reportname+'.fr3';
+   sfile:=frxpath+'\'+Reportname+'.'+'RFDB';
+   ReadFastReport(Whrstr,sfile,tfile);
+   result:=tfile;
+   if FileExists(sfile) then DeleteFile(sfile);
+ Except on e:exception do
+ begin
+  Errorstr:=e.Message;
+  Axpro1.dbm.gf.DoDebug.Msg('Error : ' + Errorstr);
+ end;
+ end;
+ if Errorstr<>'' then begin
+   if FileExists(sfile) then DeleteFile(sfile);
+   raise Exception.Create(Errorstr);
+ end;
+end;
+
+
+procedure TAxfastRun.ReadFastReport(frTemplateName: String; ResultStm : TStringStream);
+var
+  ErrorMsg, FileErr: string;
+  sTblName, sBlobFldname, sPrmVal, sPrmType,Whrstr: String;
+  stm,dcstm: TStringStream;
+begin
+  try
+    //TStringStream object (ResultStm) handled same as in uDBManager ReadMemo
+    {
+    if assigned(ResultStm) then
+    begin
+      FreeAndNil(ResultStm);
+      ResultStm := TStringStream.Create('',TEncoding.UTF8);
+      ResultStm.Position := 0;
+    end;
+     }
+    stm := nil;
+    dcstm := nil;
+    ErrorMsg := '';
+    FileErr := '';
+
+    sTblName := 'axpertreports';
+    sBlobFldname := 'design';
+    sPrmVal := Lowercase(frTemplateName);
+    sPrmType := 'c';
+    Whrstr := Axpro1.dbm.gf.SQLLower+'(caption) = :frtemplatename';
+    try
+      stm := TStringStream.create('');
+      Axpro1.dbm.gf.DoDebug.Msg('Reading Blob ' + sBlobFldname + ' from ' +
+        sTblName);
+      //Read FR template content from axpertreports table
+      Axpro1.dbm.ReadMemo(sBlobFldname, sTblName, Whrstr, sPrmVal,
+        sPrmType, stm);
+      if stm.Size = 0 then
+        Raise Exception.create
+          ('Unable to read fast report template from the database.')
+        // result:= nil
+      else
+      begin
+        try
+          //Decompressing stream
+          dcstm := TStringStream.create('');
+          stm.Position := 0;
+          with TCompress.create do
+          begin
+            dcstm := DecompressStream(stm);
+            destroy;
+          end;
+          dcstm.Position := 0;
+        except on e:exception do
+          FileErr := E.Message;
+        end;
+
+      end;
+      (*
+      Loading the template and checking whether the frx template is valid or not.
+
+      In the latest version frx templates stored in the single blob with compressed format
+      but in older versions (8x) , frx templates stored in the multi blobs without compressing.
+      To hanlde this below functionality is added (copied from existing functionality ReadFastReport overload method)
+      *)
+      if FileErr = '' then
+      begin
+        frxReport.EngineOptions.SilentMode := True;
+        frxReport.Errors.Clear;
+        frxReport.LoadFromStream(dcstm);
+        dcstm.Position := 0;
+        FileErr := Trim(frxReport.Errors.Text);
+      end;
+      if (FileErr <> '') then
+      begin
+        if assigned(stm) then
+        begin
+          frxReport.Errors.Clear;
+          Axpro1.dbm.gf.DoDebug.Msg('Error while Loading the report from DB.' +
+            #10 + FileErr + #10);
+          if assigned(dcstm) then
+            freeAndnil(dcstm);
+          stm.Position := 0;
+          dcstm := TStringStream.create(stm.DataString);
+        end
+        else
+          raise Exception.create(FileErr);
+      end;
+      //Copying decompressed stream to result stream
+      if dcstm.Size > 0 then
+      begin
+        dcstm.Position := 0;
+        ResultStm.CopyFrom(dcstm,dcstm.Size) ;
+        ResultStm.Position := 0;//Setting position to 0
+      end;
+    finally
+      //Freeying TStringStrem objects
+      if Assigned(stm) then
+        FreeAndNil(stm);
+      if Assigned(dcstm) then
+        FreeAndNil(dcstm);
+    end;
+  Except
+    on e: Exception do
+    begin
+      ErrorMsg := e.Message;
+      Axpro1.dbm.gf.DoDebug.Msg('Error in ReadFastReport : ' + ErrorMsg);
+    end;
+  end;
+  if ErrorMsg <> '' then
+    raise Exception.create(ErrorMsg);
+end;
+
+
+Procedure TAxfastRun.ReadFastReport(Whrstr,sfile,tfile:string);
+var x1:Txds;
+    ErrorMsg,FileErr:string;
+begin
+  try
+   ErrorMsg:='';
+   x1:=Axpro1.dbm.GetXDS(nil);
+   x1.buffered:=true;
+   x1.CDS.CommandText:='Select caption from AxpertReports where '+Whrstr+' and blobno>1 ';
+   x1.open;
+   Axpro1.dbm.gf.DoDebug.Msg('Blob count for the report :'+Inttostr(x1.CDS.RecordCount)+#10);
+   if x1.CDS.RecordCount = 0 then begin
+     Axpro1.dbm.ReadBlob('design','axpertreports',Whrstr,sfile,true);   // Reading Huge Blob (i.e) Read blob field without split
+     Axpro1.dbm.gf.DoDebug.Msg('Reading Blob without split'+#10);
+     with TCompress.Create do
+     begin
+      DecompressFile(sfile,tfile);
+      destroy;
+     end;
+     frxReport.EngineOptions.SilentMode:=true;
+     frxReport.Errors.Clear;
+     frxReport.LoadFromFile(tfile);
+     FileErr:=Trim(frxReport.Errors.Text);
+     if (FileErr<>'') then begin
+       frxReport.Errors.Clear;
+       Axpro1.dbm.gf.DoDebug.Msg('Error while Loading the report from DB.'+#10+FileErr+#10);
+       if FileExists(tfile) then DeleteFile(tfile);
+       Axpro1.dbm.ReadBlob('design','axpertreports',Whrstr,tfile);
+     end;
+   end
+   else begin
+      Axpro1.dbm.gf.DoDebug.Msg('Reading Blob by spliting'+#10);
+      Axpro1.dbm.ReadBlob('design','axpertreports',Whrstr,tfile)
+   end;
+  Except on e:exception do
+  begin
+    ErrorMsg:= e.Message;
+    Axpro1.dbm.gf.DoDebug.Msg('Error : ' + ErrorMsg);
+  end;
+  end;
+  if Assigned(x1) then begin
+    x1.close;
+    freeandnil(x1);
+  end;
+  if ErrorMsg<> '' then raise Exception.Create(ErrorMsg);
+end;
+
+procedure TAxfastRun.WriteFastReport(Whrstr,sfile,tfile:string);
+var Errorstr:string;
+begin
+  try
+    Errorstr:='';
+    if FileExists(tfile) then deletefile(tfile);
+    with TCompress.Create do
+    begin
+      CompressFile(sfile,tfile);
+      destroy;
+    end;
+    Axpro1.dbm.WriteBlob('design','axpertreports',Whrstr,tfile,true);            // Writting Huge Blob (i.e) Write binary file on blob field without split
+    if FileExists(tfile) then deletefile(tfile);
+  Except on e:Exception do
+     Errorstr:=e.Message;
+  end;
+  if Errorstr<>'' then begin
+    if FileExists(tfile) then deletefile(tfile);
+    raise Exception.Create(Errorstr);
+  end;
+end;
+
+
+Procedure TAxfastRun.ValidateList(Strlist:TStringlist;Typ:string);
+var i:integer;
+ ErrorMsg:string;
+begin
+  for I := 0 to Strlist.Count-1 do begin
+    if Trim(Strlist[i])='' then begin
+      if Typ='recordid' then
+        ErrorMsg:='Recordid not defined to create the print document.'
+      else if Typ='report' then
+        ErrorMsg:='Print form not defined to create the print document.';
+      raise Exception.Create(ErrorMsg);
+    end;
+  end;
+end;
+
+function TAxfastRun.ModifyHandleFile(RandomNo: Integer) : String;
+var
+  mystrlist: Tstringlist;
+  networkprinterdetails : TStringList;
+  expath,txtfilename, txtfilefullpath, ipaddress, printersharename,PrintCommand,Err_str: String;
+begin
+  try
+    Err_str:='';
+    Result := '';
+    expath:= Axpro1.dbm.gf.StartPath;
+    txtfilename:='DPfile'+inttostr(randomno)+'.txt';
+    txtfilefullpath := expath + txtfilename;
+    Axpro1.dbm.gf.DoDebug.Msg('Dos-filename :'+txtfilefullpath);
+    mystrlist:=TStringList.Create;
+    networkprinterdetails := TStringList.Create;
+    if fileexists(expath+'PrinterDetails.txt') then begin
+      Axpro1.dbm.gf.DoDebug.Msg('Connecting Network printer... ');
+      networkprinterdetails.LoadFromFile(expath+'PrinterDetails.txt');
+      if networkprinterdetails.Count > 1 then begin
+        ipaddress := networkprinterdetails.Strings[0];
+        if trim(ipaddress) = '' then raise Exception.Create('Please provide the computer name or the IP address'
+                                                             +' where the printer is located in the file ''PrinterDetails.txt''');
+        printersharename := networkprinterdetails.Strings[1];
+        if trim(printersharename) = '' then raise Exception.Create('Please provide the share name of the printer in the file ''''PrinterDetails.txt''');
+        PrintCommand :='print /d:' + '\\' +ipaddress+ '\' + printersharename + ' ' +txtfilefullpath;
+        mystrlist.Add(PrintCommand);
+        mystrlist.SaveToFile(expath+'HandleNetworkPrint.bat');
+        Result := 'HandleNetworkPrint.bat';
+      end
+      else raise Exception.Create('Printer information not found in the file ''''PrinterDetails.txt''');
+    end
+    else begin
+      Axpro1.dbm.gf.DoDebug.Msg('Connecting Local printer... ');
+      mystrlist.Add('cd %1');
+      mystrlist.Add('type '+txtfilename+' >prn');
+      mystrlist.SaveToFile(expath+'Handle.bat');
+      Result := 'Handle.bat';
+    end;
+  if Assigned(mystrlist) then freeandnil(mystrlist);
+  if Assigned(networkprinterdetails) then freeandnil(networkprinterdetails);
+  Except on e :Exception do
+    Err_str:=e.Message;
+  end;
+  if Err_str<>'' then begin
+    Result:='';
+    Axpro1.dbm.gf.DoDebug.Msg(Err_str);
+    if Assigned(mystrlist) then freeandnil(mystrlist);
+    if Assigned(networkprinterdetails) then freeandnil(networkprinterdetails);
+    raise Exception.Create(Err_str);
+  end;
+end;
+
+procedure TAxfastRun.PrintReportToPDFPrinter(const Report: TfrxReport; const PDFOutFilename: string);
+var
+  DefaultPrinter,iVirtualPrinterIndex : Integer;
+begin
+  axpro1.dbm.gf.DoDebug.Msg('PrintReportToPDFPrinter starts...');
+  iVirtualPrinterIndex := -1;
+  // Save the current default printer
+  DefaultPrinter := Printer.PrinterIndex;
+  try
+  (*
+  The default name for the 'Adobe PDF' printer might vary based on the installation.
+  However, you can typically find it in the list of installed printers on your system.
+  You can check the installed printers in the Windows Control Panel or Settings.
+
+  As for Bullzip PDF Printer, the default printer name is usually 'Bullzip PDF Printer'.
+  Again, you can verify this in the list of installed printers on your system.
+
+  Similary you can use any available PDF printers for this purpose.
+
+  Here are the general steps to check installed printers:
+
+  For Windows 10+:
+
+  Open Settings.
+  Go to Devices.
+  Select Printers & scanners on the left.
+  You will see a list of installed printers.
+
+  *)
+  // Set the default printer to the Adobe PDF printer
+  //Adobe PDF
+  //Printer.PrinterIndex := Printer.Printers.IndexOf('Adobe PDF');
+
+  //Bullzip PDF Printer | It works diff , need to analyse | uses AGPL Ghost scripts
+  //Printer.PrinterIndex := Printer.Printers.IndexOf('Bullzip PDF Printer');
+
+  //Microsoft Print to PDF | uses AGPL Ghost scripts
+  //Printer.PrinterIndex := Printer.Printers.IndexOf('Microsoft Print to PDF');
+
+  //CutePDF Writer
+  //Printer.PrinterIndex := Printer.Printers.IndexOf('CutePDF Writer');
+
+  iVirtualPrinterIndex := Printer.Printers.IndexOf(Axp_VirtualPDFPrinter);
+  if iVirtualPrinterIndex = -1 then
+    raise Exception.Create('PrintReportToPDFPrinter/ PDF printer '+Axp_VirtualPDFPrinter+' not found.');
+
+  //set Virtual PDF printer
+  Printer.PrinterIndex := iVirtualPrinterIndex;//Printer.Printers.IndexOf(Axp_VirtualPDFPrinter);
+
+  // Set the output directory for saving the PDF file
+  Report.FileName := PDFOutFilename;
+  //Report.PrepareReport; //Prepare report already excuted , so skipping it here
+
+  axpro1.dbm.gf.DoDebug.Msg('Output filename '+PDFOutFilename);
+  Report.PrintOptions.PrnOutFileName := PDFOutFilename;
+
+  //Report.PrintOptions.Printer := Printer.Printers[Printer.PrinterIndex];
+  //SILENT | suppress printer dialog and print silently,
+  Report.PrintOptions.ShowDialog := False; // Suppress the print dialog
+  Report.PrintOptions.Printer := Printer.Printers[Printer.PrinterIndex];
+  axpro1.dbm.gf.DoDebug.Msg('Virtual Printer '+Report.PrintOptions.Printer);
+
+  axpro1.dbm.gf.DoDebug.Msg('Executing Report.print.');
+  // "Print" the report to the PDF file
+  Report.print;
+
+  finally
+    // Restore the default printer
+    axpro1.dbm.gf.DoDebug.Msg('Restoring default printer');
+    Printer.PrinterIndex := DefaultPrinter;
+  end;
+  axpro1.dbm.gf.DoDebug.Msg('PrintReportToPDFPrinter ends.');
+end;
+
+function TAxfastRun.FillCompanyVars(S: String): String;
+Var
+  p1, p2 : integer;
+  CName, CValue,tempsql: String;
+Begin
+  try
+    tempsql := s;
+    While true Do Begin
+      p1 := pos('{', S);
+      If p1 = 0 Then break;
+      p2 := pos('}', S);
+      If p2 = 0 Then p2 := pos(' ', copy(S,p1+1,20000));
+      CName := Trim(Copy(S, p1 + 1, p2 - p1 - 1));
+      CValue := Storedata.GetFieldValue(Cname, 1);
+      axpro1.dbm.gf.DoDebug.msg(CName + ' = ' + CValue);
+      Delete(S, p1, p2 - p1 + 1);
+      Insert(CValue, S, p1);
+    End;
+    result := s;
+  except on e:exception do
+    result := tempsql;
+  end;
+End;
+
+Function TAxfastRun.FillCompositeVars(S: String): String;
+Var
+  p1,tp1, p2, p: integer;
+  CName, CValue, fname: String;
+Begin
+  p1 := pos(':', S);
+  While p1 > 0 Do Begin
+    p2 := pos(' ', copy(S,p1+1,20000));
+    p2 := p1+p2;
+    CName := trim(Copy(S, p1 + 1, p2 - p1 - 1));
+    if pos('<',cname) > 0 then
+    begin
+      p2 := pos('<', copy(S,p1+1,20000));
+      p2 := p1+p2;
+      CName := trim(Copy(S, p1 + 1, p2 - p1 - 1));
+    end;
+    CValue := Storedata.GetFieldValue(CName,1);
+    axpro1.dbm.gf.DoDebug.msg(CName + ' = ' + CValue);
+    Delete(S, p1, p2 - p1);
+    Insert(CValue, S, p1);
+    p1 := pos(':', S);
+  End;
+  Result := S;
+End;
+
+
+function TAxfastRun.RemoveHTMLTags(S: String): String;
+Var
+  p1, p2 : integer;
+  CName, CValue,tempsql: String;
+Begin
+  try
+    tempsql := s;
+    While true Do Begin
+      p1 := pos('<', S);
+      If p1 = 0 Then break;
+      p2 := pos('>', S);
+      If p2 = 0 Then p2 := pos(' ', copy(S,p1+1,20000));
+      CName := Trim(Copy(S, p1 + 1, p2 - p1 - 1));
+//      CValue := Storedata.GetFieldValue(Cname, 1);
+      CValue := '';
+//      axpro1.dbm.gf.DoDebug.msg(CName + ' = ' + CValue);
+      Delete(S, p1, p2 - p1 + 1);
+      Insert(CValue, S, p1);
+    End;
+    result := s;
+  except on e:exception do
+    result := tempsql;
+  end;
+End;
+
+//FastPrint | Dynamic Template creation Starts here
+
+//BindDataSource
+Procedure TAxFastRun.BindMasterDataSource(pSQLText : String);
+var
+  iIdx,jIdx : Integer;
+  frxMasterData : TfrxMasterData;
+  frxDBXQuery : TfrxDBXQuery;
+  frxADOQuery : TfrxADOQuery;
+
+  frxComponent : TfrxComponent;
+  frxDataPage : TfrxDataPage;
+  frxDataSets : TfrxCustomDBDataSet;
+begin
+  if pSQLText = '' then
+    Exit;
+  try
+    frxMasterData := nil;
+    frxDBXQuery := nil;
+    frxADOQuery := nil;
+
+    frxComponent := nil;
+    frxDataPage := nil;
+    frxDataSets := nil;
+    try
+      frxComponent := frxReport.FindObject('Data'); //Finding data object
+      if Not Assigned(frxComponent) then
+        Exit;
+      frxDataPage := TfrxDataPage(frxComponent);
+
+      Axpro1.dbm.gf.DoDebug.Msg('BindDataSource starts... ');
+      for iIdx :=  0 to frxReport.ComponentCount-1 do
+      begin
+        if frxReport.Components[iIdx].ClassType = TfrxMasterData then
+        begin
+          frxMasterData := TfrxMasterData(frxReport.Components[iIdx]);
+          frxMasterData.Stretched := True; //Stretched
+          if Axpro1.dbm.connection.dbtype = 'ms sql' then
+          begin
+            frxADOQuery := TfrxADOQuery.Create(frxDataPage);
+            frxADOQuery.Name := 'ADOQuery1';
+            frxADOQuery.Query.SQL.Text := pSQLText;
+            for jIdx := 0 to frxADOQuery.Params.Count-1 do
+            begin
+              //Params handled in setparam values / other than ftstring may need to be handled here.
+            end;
+            frxADOQuery.Query.Open;
+            frxReport.DataSets.Add(frxADOQuery);
+          end
+          else
+          begin
+            frxDBXQuery := TfrxDBXQuery.Create(frxDataPage);
+            frxDBXQuery.Name := 'DBXQuery1';
+            Axpro1.dbm.gf.DoDebug.Msg('Assigning SQL ' + pSQLText);
+            // The below code sets sql to DBXQuery component
+            frxDBXQuery.Query.SQL.Text := pSQLText;
+            // The below code used to find params for oracle.
+            if Axpro1.dbm.Connection.DbType = 'oracle' then
+              frxDBXQuery.Query.CommandText := pSQLText;
+            // else
+            // frxDBXQuery.Query.SQL.Text := pSQLText;
+
+            Axpro1.dbm.gf.DoDebug.Msg('Params count ' +
+              InttoStr(frxDBXQuery.Query.Params.Count));
+
+            for jIdx := 0 to frxDBXQuery.Query.Params.Count - 1 do
+            begin
+              Axpro1.dbm.gf.DoDebug.Msg('BindDataSource/Set param type ');
+              // Params handled in setparam values / other than ftstring may need to be handled here.
+              // As of now handled only for oracle since it throws unknown type
+              // But it works with postgres (explicit assignment not needed for postgres)
+              if Axpro1.dbm.Connection.DbType = 'oracle' then
+              begin
+                frxDBXQuery.Query.Params[jIdx].DataType := ftWideString;
+                try
+                  frxDBXQuery.Query.Params[jIdx].Value := '';
+                Except
+                End;
+              end;
+              // Based on param field type we can set datatype
+            end;
+            frxDBXQuery.Query.Open;
+            frxReport.DataSets.Add(frxDBXQuery);
+          end;
+          Break;//As per the design we will be having only one Master band --so breaking the loop
+        end;
+      end;
+      Axpro1.dbm.gf.DoDebug.Msg('BindDataSource ends. ');
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in BindDataSource '+E.Message);
+    end;
+  finally
+
+  end;
+end;
+
+
+//BindDetailDataSource
+Procedure TAxFastRun.BindDetailDataSource(pXDS : TXDS);
+var
+  sSQLText : String;
+  iIdx,jIdx : Integer;
+  frxDetailData : TfrxDetailData;
+  frxHeader : TfrxHeader;
+  frxDBXQuery : TfrxDBXQuery;
+  frxADOQuery : TfrxADOQuery;
+
+  frxComponent : TfrxComponent;
+  frxDataPage : TfrxDataPage;
+  frxDataSets : TfrxCustomDBDataSet;
+
+begin
+  try
+    Axpro1.dbm.gf.DoDebug.Msg('BindDetailDataSource starts... ');
+    frxDetailData := nil;
+    frxHeader := nil;
+    frxDBXQuery := nil;
+    frxADOQuery := nil;
+
+    frxComponent := nil;
+    frxDataPage := nil;
+    frxDataSets := nil;
+
+    sSQLText := pXDS.CDS.FieldByName('detail_datasource_sql_text').AsString;
+    if sSQLText = '' then
+    begin
+      Axpro1.dbm.gf.DoDebug.Msg('BindDetailDataSource/detail datasource sqltext is empty');
+      Exit;
+    end;
+    if Trim(pXDS.CDS.FieldByName('tbl_detail_band').AsString) = '' then
+    begin
+      Axpro1.dbm.gf.DoDebug.Msg('BindDetailDataSource/detail columns not defined.');
+      Exit;
+    end;
+
+    try
+      frxComponent := frxReport.FindObject('Data');  //Finding data object
+      if Not Assigned(frxComponent) then
+        Exit;
+      frxDataPage := TfrxDataPage(frxComponent);
+
+      for iIdx :=  0 to frxReport.ComponentCount-1 do
+      begin
+        if frxReport.Components[iIdx].ClassType = TfrxDetailData then
+        begin
+          frxDetailData := TfrxDetailData(frxReport.Components[iIdx]);
+          //frxDetailData.Stretched := False;//Stretched
+          if Axpro1.dbm.connection.dbtype = 'ms sql' then
+          begin
+            frxADOQuery := TfrxADOQuery.Create(frxDataPage);
+            frxADOQuery.Name := 'ADOQuery2';
+            frxADOQuery.Query.SQL.Text := sSQLText;
+            for jIdx := 0 to frxADOQuery.Params.Count-1 do
+            begin
+              //Params handled in setparam values / other than ftstring may need to be handled here.
+            end;
+            frxADOQuery.Query.Open;
+            frxReport.DataSets.Add(frxADOQuery);
+            frxDetailData.DataSet := frxADOQuery;
+          end
+          else
+          begin
+            frxDBXQuery := TfrxDBXQuery.Create(frxDataPage);
+            frxDBXQuery.Name := 'DBXQuery2';
+            Axpro1.dbm.gf.DoDebug.Msg('Assigning SQL ' + sSQLText);
+            // The below code sets sql to DBXQuery component
+            frxDBXQuery.Query.SQL.Text := sSQLText;
+            // The below code used to find params for oracle.
+            if Axpro1.dbm.Connection.DbType = 'oracle' then
+              frxDBXQuery.Query.CommandText := sSQLText;
+            // else
+            // frxDBXQuery.Query.SQL.Text := sSQLText;
+
+            Axpro1.dbm.gf.DoDebug.Msg('Params count ' +
+              InttoStr(frxDBXQuery.Query.Params.Count));
+            for jIdx := 0 to frxDBXQuery.Query.Params.Count - 1 do
+            begin
+              Axpro1.dbm.gf.DoDebug.Msg('BindDetailDataSource/Set param type ');
+              // Params handled in setparam values / other than ftstring may need to be handled here.
+              // As of now handled only for oracle since it throws unknown type
+              // But it works with postgres (explicit assignment not needed for postgres)
+              if Axpro1.dbm.Connection.DbType = 'oracle' then
+              begin
+                frxDBXQuery.Query.Params[jIdx].DataType := ftWideString;
+                try
+                  frxDBXQuery.Query.Params[jIdx].Value := '';
+                Except
+                End;
+              end;
+              // Based on param field type we can set datatype
+            end;
+            frxDBXQuery.Query.Open;
+            frxReport.DataSets.Add(frxDBXQuery);
+            frxDetailData.DataSet := frxDBXQuery;
+          end;
+          Break;//As per the design we will be having only one details band --so breaking the loop
+        end
+        else if frxReport.Components[iIdx].ClassType = TfrxHeader{TfrxDetailData} then
+        begin
+          frxHeader := TfrxHeader(frxReport.Components[iIdx]);
+          //frxHeader.Stretched := True;//False;
+        end;
+        if Assigned(frxHeader) and Assigned(frxDetailData) then
+          Break;
+      end;
+      PrepareDetailData(frxHeader,frxDetailData,pXDS);
+      Axpro1.dbm.gf.DoDebug.Msg('BindDetailDataSource ends. ');
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in BindDetailDataSource '+E.Message);
+    end;
+  finally
+
+  end;
+end;
+
+
+function GetFieldType(fldDataType:TFieldType):String;
+begin
+  if (fldDataType in [ftString, ftFixedChar, ftWideString]) then Result := 'c'
+  else if (fldDataType in [ftSmallInt, ftInteger, ftWord, ftFloat, ftCurrency, ftBCD,
+          ftBytes, ftVarBytes, ftAutoInc, ftLargeInt, ftFMTBcd]) then Result := 'n'
+  else if (fldDataType in [ftDate, ftTime, ftDateTime, ftTimeStamp]) then Result := 'd'
+  else if (fldDataType in [ftMemo, ftFmtMemo, ftOraClob]) then Result := 't'
+  else if (fldDataType in [ftblob,ftGraphic, ftOraBlob]) then Result := 'i'
+  else if (fldDataType in [ftBoolean]) then Result := 'b'
+  else if (fldDataType in [ftunknown, ftVariant, ftInterface, ftParadoxOLE, ftDBaseOLE,
+                ftTypedBinary, ftADT, ftArray, ftReference, ftDataSet, ftIDispatch,
+                ftGUID, ftCursor]) then Result := 'u';
+end;
+
+
+//PrepareDetailData
+Procedure TAxFastRun.PrepareDetailData(pfrxHeaderData:TfrxHeader;pfrxDetailData : TfrxDetailData;pXDS:TXDS);
+var
+  detailsSourceXDS : TXDS;
+  sSQLText,sFieldName,sFrameType : String;
+  iCol : Integer;
+  fLeft,fTop,fWidth,fHeight,fFldWidth : Extended;
+
+  sFrmType,sMemoExpr,sMemoAlign,sTextAlign,sColHeadStr,sColFormatStr : String;
+  sDataSetName,CurColHeadStr,CurColFormatStr,tmpstr : String;
+  bAutoSize,bFldHidden : Boolean;
+  frxDetailDataComp,frxHeaderComp : TfrxComponent;
+  dummyFrxMasterData : TfrxMasterData;
+begin
+  try
+    Axpro1.dbm.gf.DoDebug.Msg('PrepareDetailData starts... ');
+    detailsSourceXDS := nil;
+    if Not Assigned(pfrxDetailData) then // frxDetailData not exists
+      Exit;
+    try
+    sSQLText := pXDS.CDS.FieldByName('detail_datasource_sql_text').AsString;
+    //Colname,hide,width,fontsize,fontcolor,fontname,fontstyle~colname… | Old
+    //ColName,hide,width,TextAlign,FontName,FontSize,FontColor,FontStyle~ | New
+    //sColHeadStr := pXDS.CDS.FieldByName('detail_data_columnheadstring').AsString;
+
+    // value separator | instead of comma , 1st column to be ignored since it will be a sql column name
+    sColHeadStr := pXDS.CDS.FieldByName('tbl_detail_band').AsString;
+    //sColFormatStr := pXDS.CDS.FieldByName('detail_data_columnstring').AsString;
+    // FarmeType
+    {
+    No Frame - No border
+  	All Frame - All borders
+	  [Later can introdcue more options if required.]
+    }
+    sFrameType := lowercase(pXDS.CDS.FieldByName('detail_data_frame_type').AsString);
+
+    sFrmType := 'LRBT';
+
+    if sFrameType = 'no frame' then
+      sFrmType := ''
+    else if sFrameType = 'all frame lines' then
+      sFrmType := 'LRBT';
+
+    detailsSourceXDS := Axpro1.dbm.GetXDS(nil);
+    detailsSourceXDS.buffered := True;
+    detailsSourceXDS.CDS.CommandText := sSQLText;
+    detailsSourceXDS.open;
+
+    fLeft := 10;//2;
+    fTop := 0;
+    fWidth := 0;
+    fHeight := 0;
+
+    sMemoExpr := '';
+    sMemoAlign := 'bn';
+    sTextAlign := 'L';
+    //sFontStr := 'clBlack,10,tahoma,F'; //ColName,hide,width,TextAlign,FontName,FontSize,FontColor,FontBoldStyle,DisplayFormat~colname…
+    //sColHeadStr:='username,f,100,L,tahoma,10,clblack,bold,~email,f,200,L,tahoma,10,clblack,italic,';//ColName,hide,width,TextAlign,FontName,FontSize,FontColor,FontStyle~ | New
+
+    bAutoSize := False;
+    bFldHidden := True;
+    pfrxDetailData.KeepHeader := True; //Keep Header together set to true
+    frxDetailDataComp := pfrxDetailData;
+
+    if Not Assigned(pfrxHeaderData) then
+    begin
+      pfrxHeaderData := TfrxHeader.Create(frxDetailDataComp.Parent);
+      pfrxHeaderData.Parent := frxDetailDataComp.Parent;
+      pfrxHeaderData.CreateUniqueName;
+      pfrxHeaderData.Top := frxDetailDataComp.Top;
+      pfrxHeaderData.Width := frxDetailDataComp.Width;
+      frxDetailDataComp.Top := pfrxHeaderData.Top+{pfrxHeaderData.Height}40;
+      pfrxHeaderData.Stretched := True;//False;////Stretched
+    end;
+    frxHeaderComp := pfrxHeaderData;
+    //creating dummyMasterData | Detaildata bands bottom border of last row not printing. to handle this adding the dummy band
+    //it seems there is a bug in the FR
+    dummyFrxMasterData := TfrxMasterData.Create(frxDetailDataComp.Parent);
+    dummyFrxMasterData.CreateUniqueName;
+    dummyFrxMasterData.Top := frxDetailDataComp.Top+frxDetailDataComp.Height+5;
+    dummyFrxMasterData.Width := frxDetailDataComp.Width;
+    dummyFrxMasterData.RowCount := 1;
+
+
+    fWidth := 100;
+    fHeight := 25;
+
+    if Lowercase(Axpro1.dbm.Connection.DbType) = 'ms sql' then
+      sDataSetName := 'ADOQuery2'
+    else
+      sDataSetName := 'DBXQuery2';
+
+    for iCol := 0 to detailsSourceXDS.CDS.Fields.Count-1 do
+    begin
+      CurColHeadStr := Axpro1.dbm.gf.GetNthString(sColHeadStr,iCol+1,'~');
+      //CurColFormatStr := Axpro1.dbm.gf.GetNthString(sColFormatStr,iCol+1,'~');
+      //bFldHidden := LowerCase(Axpro1.dbm.gf.GetNthString(CurColHeadStr,2))='t';
+      bFldHidden := LowerCase(Axpro1.dbm.gf.GetNthString(CurColHeadStr,3,'|'))='yes';
+      //tmpstr := Axpro1.dbm.gf.GetNthString(CurColHeadStr,3);
+      tmpstr := Axpro1.dbm.gf.GetNthString(CurColHeadStr,4,'|');
+      if tmpstr <> '' then
+        fFldWidth := StrToFloat(tmpstr)
+      else
+        fFldWidth := fWidth;
+      //If field is visble then proceed.
+      if Not bFldHidden then
+      begin
+        sFieldName := detailsSourceXDS.CDS.Fields[iCol].FieldName;
+        sMemoExpr := '['+sDataSetName+'."'+sFieldName+'"]';
+        // CreateFrxMemo  | For header
+        CreateFrxMemo(fLeft,fTop,fWidth,fHeight,sFrmType,{sMemoExpr}sFieldName,sMemoAlign,sTextAlign,CurColHeadStr,bAutoSize,frxHeaderComp,True);//For header
+        //if frxHeaderComp.Height < fHeight then //Set maxheight for parent
+        //  frxHeaderComp.Height := fHeight;
+
+        //Numeric column right alignement set
+        if {Axpro1.dbm.gf.}GetFieldType(detailsSourceXDS.CDS.Fields[iCol].DataType) = 'n' then
+           sTextAlign := 'R';
+        // CreateFrxMemo  | For detaildata
+        CreateFrxMemo(fLeft,fTop,fWidth,fHeight,sFrmType,sMemoExpr,sMemoAlign,sTextAlign,CurColHeadStr,bAutoSize,frxDetailDataComp);//For data
+        //if frxDetailDataComp.Height < fHeight then //Set maxheight for parent
+        //  frxDetailDataComp.Height := fHeight;
+        fLeft := fLeft + fFldWidth{fWidth};
+      end;
+    end;
+    frxHeaderComp.Height := fHeight;
+    frxDetailDataComp.Height := fHeight;
+    Axpro1.dbm.gf.DoDebug.Msg('PrepareDetailData ends. ');
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('PrepareDetailData/ Error '+E.Message);
+    end;
+  finally
+    if Assigned(detailsSourceXDS) then
+      FreeAndNil(detailsSourceXDS);
+  end;
+
+end;
+
+//Setframe
+function TAxFastRun.Setframe(st: String):TfrxFrameTypes;
+Var
+ i: integer;
+ re:TfrxFrameTypes;
+ rs:string;
+begin
+ re:= [ftLeft] + [ftRight] + [ftTop] + [ftBottom] ;
+ If Pos('L', st) = 0  then re:= re - [ftLeft] ;
+ If Pos('R', st) = 0 then re:=  re - [ftRight];
+ If Pos('B', st) = 0 then re:= re - [ftBottom];
+ If Pos('T', st) = 0 then re:= re - [ftTop];
+ result:=re;
+End;
+
+//CreateFrxMemo
+procedure TAxFastRun.CreateFrxMemo(Lf,tp,wid,ht:Double;FrmType,val,Talign,Calign,ColHeadstr:string;MAutosize:boolean;parnt:TfrxComponent;bIsHeader : boolean = False);
+var fs:integer;
+  tmpstr,sFldCaption,sTextAlign,fntname,fntstyle,fntclr,formatstr:string;
+  bFldHidden : Boolean;
+  fFldWidth : Extended;
+begin
+ try
+   Axpro1.dbm.gf.DoDebug.msg('CreateFrxMemo starts...');
+   fFldWidth := 0;
+   fs:=0;
+//   if ColHeadstr<>'' then begin   //ColName,hide,width,TextAlign,FontName,FontSize,FontColor,FontBoldStyle~ | New
+//    sFldCaption := Axpro1.dbm.gf.GetNthString(ColHeadstr,1);
+//    bFldHidden := LowerCase(Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,2)))='t';
+//    tmpstr := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,3));
+//    if tmpstr <> '' then
+//      fFldWidth := StrToFloat(tmpstr);
+//    sTextAlign := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,4));
+//    if sTextAlign <> '' then
+//      Talign := sTextAlign;
+//    fntname:=Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,5));
+//    tmpstr := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,6));
+//    if tmpstr <> '' then
+//      fs:=StrToInt(Axpro1.dbm.gf.GetNthString(ColHeadstr,6));
+//    fntclr:=Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,7));
+//    fntstyle:=Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,8));
+//    formatstr := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,9));
+//   end;
+
+    //First column will be column name so we can avoid '1'st position string
+    if ColHeadstr<>'' then begin   //ColName,hide,width,TextAlign,FontName,FontSize,FontColor,FontBoldStyle~ | New
+      sFldCaption := Axpro1.dbm.gf.GetNthString(ColHeadstr,2,'|');
+      bFldHidden := LowerCase(Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,3,'|')))='yes';
+      tmpstr := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,4,'|'));
+      if tmpstr <> '' then
+        fFldWidth := StrToFloat(tmpstr);
+      sTextAlign := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,5,'|'));
+      if sTextAlign <> '' then
+        Talign := sTextAlign;
+      fntname:=Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,6,'|'));
+      tmpstr := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,7,'|'));
+      if tmpstr <> '' then
+        fs:=StrToInt(Axpro1.dbm.gf.GetNthString(ColHeadstr,7,'|'));
+      fntclr:=Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,8,'|'));
+      fntstyle:=Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,9,'|'));
+      formatstr := Trim(Axpro1.dbm.gf.GetNthString(ColHeadstr,10,'|'));
+     end;
+
+   with TfrxMemoView.Create(parnt) do begin
+    //if IsPageFooter then
+    //  ExpressionDelimiters := '[,]'
+    //else
+      ExpressionDelimiters := '';
+    CreateUniqueName;
+    if bIsHeader then
+    begin
+      if sFldCaption <> '' then
+        Text := sFldCaption
+      else
+        Text := val;
+      fntstyle := 'bold';//'T'; //Default BOLD enabled for heading
+      //CAlign='bc';//Center alignment default
+      Talign := 'C';
+      if FrmType <> '' then //if frame type not empty then enable all frame lines for header column
+        FrmType := 'LRBT';
+      StretchMode := smActualHeight;
+      ShiftMode := smWhenOverlapped; //Shiftmode set to smWhenOverlapped
+    end
+    else
+      Text := val;
+    if bFldHidden then
+    begin
+      fFldWidth := 0;
+      wid := 0;
+      FrmType := '';
+    end;
+    if fFldWidth > 0 then
+      SetBounds(Lf,tp,fFldWidth ,ht)
+    else
+      SetBounds(Lf,tp,wid ,ht);
+    HAlign := haCenter;
+
+    FrmType := UpperCase(FrmType);
+    //if FrmType<>'' then
+    Frame.Typ:=Setframe(FrmType);
+
+    Calign := LowerCase(Calign);
+    if Calign<>'' then begin
+     if Calign='bn' then
+      Align:=baNone
+     else if Calign='bl' then
+      Align:=baLeft
+     else if Calign='br' then
+      Align:=baRight
+     else if CAlign='bc' then
+      Align :=baCenter
+     else if CAlign='bcl' then
+      Align :=baClient
+     else if CAlign='bw' then
+      Align:=baWidth
+     else if CAlign='bb' then
+      Align:=baBottom;
+    end
+    else
+     Align:=baNone;
+
+    Talign := UpperCase(Talign);
+    if Talign='LEFT' then
+     HAlign:=haLeft
+    else if Talign='RIGHT' then
+     HAlign:=haRight
+    else if Talign='CENTER' then
+     HAlign:=haCenter
+    else if Talign='BOTTOM' then
+     HAlign:=haBlock
+    else
+     HAlign:=haLeft;
+
+    if fs <>0 then
+     font.Size:=fs
+    else
+     font.Size:=10;
+    if fntclr<>'' then
+     font.Color:=StringToColor(fntclr)
+    else
+     font.Color:=StringToColor('clBlack');
+
+    fntstyle := Lowercase(fntstyle);
+    if fntstyle='bold' then
+     font.Style:=[fsbold]
+    else if fntstyle='italic' then
+     font.Style:=[fsItalic]
+    else if fntstyle='underline' then
+     font.Style:=[fsUnderline]
+    else if fntstyle='strike' then
+     font.Style:=[fsStrikeOut];
+
+    if fntname<>'' then
+     Font.Name:=fntname
+    else
+     Font.Name:='tahoma';
+    if MAutoSize then
+     AutoWidth:=true
+    else
+     AutoWidth:=false;
+    //DisplayFormat | Now added to handle Only numeric data
+    if formatstr <> ''  then
+    begin
+      DisplayFormat.Kind := fkNumeric;
+      //https://stackoverflow.com/questions/16982047/change-currency-format-in-fastreport-delphi
+      DisplayFormat.FormatStr := formatstr;
+      //Decimal and Thousand separator can be assigned here if required.
+    end;
+    if not bIsHeader then StretchMode := smMaxHeight;//Stretch
+   end;
+   Axpro1.dbm.gf.DoDebug.msg('CreateFrxMemo ends.');
+ Except on E:Exception do
+  Axpro1.dbm.gf.DoDebug.msg('CreateFrxMemo/Error '+E.Message);
+ end;
+end;
+
+
+
+//IsValidVariableName
+function IsValidVariableName(s : String) : Boolean;
+  var i : integer;
+  c : String;
+begin
+  result := True;
+  for i := 1 to length(s) do
+  begin
+     c := copy(s,i,1);
+     if pos(c,'abcdefghijklmnopqrstuvwxyz_0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ') > 0 then continue
+     else
+     begin
+       result := false;
+       break
+     end;
+  end;
+end;
+
+(*
+//FillDynamicParamWithQueryColumn  | This is handled dynamic field starts with ':' depreacated
+Function TAxFastRun.FillDynamicParamWithQueryColumn(pContent : String;pfrxComponent : TfrxComponent):String;
+var orgInputStr, SQLText, PName,pValue, S:String;
+    p1, p2, l , i, iIdx : integer;
+    StrAfterP1pos : String;
+
+    frxDBXQuery : TfrxDBXQuery;
+    frxADOQuery : TfrxADOQuery;
+begin
+  Result := pContent;
+  frxDBXQuery := nil;
+  frxADOQuery := nil;
+  if (Trim(pContent) = '') or (pos(':', pContent) = 0) or (Not Assigned(pfrxComponent)) then exit;
+
+  if Axpro1.dbm.connection.dbtype = 'ms sql' then
+    frxADOQuery := TfrxADOQuery(pfrxComponent)
+  else
+    frxDBXQuery := TfrxDBXQuery(pfrxComponent);
+
+  orgInputStr := pContent;
+  Axpro1.dbm.gf.DoDebug.msg('Executing FillDynamicParamWithQueryColumn...');
+  Axpro1.dbm.gf.DoDebug.msg(orgInputStr);
+  while true do begin
+    p1 := pos(':', pContent);
+    If p1 = 0 Then break;
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Content '+pContent);
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Position of (:) '+InttoStr(p1));
+
+    StrAfterP1pos := Copy(pContent, p1 + 1, length(pContent));
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - StrAfterP1pos '+StrAfterP1pos);
+    iIdx := 1;
+    while IsValidVariableName(StrAfterP1pos[iIdx]) do
+    begin
+      inc(iIdx);
+    end;
+    p2 := iIdx-1;
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Postion of p2 '+InttoStr(p2));
+    pName := (Copy(pContent, p1 + 1, p2));
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - ParamName '+pName);
+    pValue := '';
+    if pName<>'' then begin
+      //try to handle it with frxdataset instead of dbx and ado
+      if Assigned(frxDBXQuery) and Assigned(frxDBXQuery.Query.Fields.FindField(pName)) then
+        pValue := '[DBXQuery1."'+pName+'"]'
+      else if Assigned(frxADOQuery) and Assigned(frxADOQuery.Query.Fields.FindField(pName)) then
+        pValue := '[ADOQuery1."'+pName+'"]'
+      else
+        pValue := '';
+    end;
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - ParamValue '+pValue);
+    Delete(pContent, p1, p2 + 1);
+    if pValue = '' then
+      Insert(' '+pName, pContent, p1)//Added dummy string to avoid unwanted string replace in the original string
+    else
+      Insert(pValue, pContent, p1);
+    if pValue <> '' then
+    begin
+      Delete(orgInputStr, p1, p2 + 1);
+      Insert(pValue, orgInputStr, p1);
+    end;
+    Axpro1.dbm.gf.DoDebug.msg('Data after Filling...');
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - pContent : '+pContent);
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - orgInputStr : '+orgInputStr);
+  end;
+  result := orgInputStr;
+  Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Final result : '+orgInputStr);
+end;
+*)
+
+//FillDynamicParamWithQueryColumn  | This is handled dynamic field like '{Field Name [fieldname]}'
+Function TAxFastRun.FillDynamicParamWithQueryColumn(pContent : String;pfrxComponent : TfrxComponent):String;
+var //orgInputStr, SQLText, PName,pValue, S:String;
+    //p1, p2, l , i, iIdx : integer;
+    //StrAfterP1pos : String;
+
+    orgInputStr, SQLText, pValue, PName : String;
+
+    frxDBXQuery : TfrxDBXQuery;
+    frxADOQuery : TfrxADOQuery;
+
+    Regex: TRegEx;
+    Match: TMatch;
+    FieldName: string;
+begin
+  Result := pContent;
+  frxDBXQuery := nil;
+  frxADOQuery := nil;
+  if (Trim(pContent) = '') or ((pos('{', pContent) = 0) and (pos('}', pContent) = 0)) or (Not Assigned(pfrxComponent)) then exit;
+
+  Regex := TRegEx.Create('{(.*?)}'); // Regular expression to match field names inside curly braces
+  Match := Regex.Match(pContent);
+
+  if Axpro1.dbm.connection.dbtype = 'ms sql' then
+    frxADOQuery := TfrxADOQuery(pfrxComponent)
+  else
+    frxDBXQuery := TfrxDBXQuery(pfrxComponent);
+
+  orgInputStr := pContent;
+  Axpro1.dbm.gf.DoDebug.msg('Executing FillDynamicParamWithQueryColumn...');
+  Axpro1.dbm.gf.DoDebug.msg(orgInputStr);
+  //while true do begin
+  while Match.Success do
+  begin
+    //p1 := pos(':', pContent);
+    //If p1 = 0 Then break;
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Content '+pContent);
+    FieldName := Match.Groups[1].Value;
+    //Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Position of (:) '+InttoStr(p1));
+    Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Data inside {} '+FieldName);
+
+    // Check if the field name is in the format: "Field Name [fieldname]"
+    if Pos('[', FieldName) > 0 then
+    begin
+      FieldName := Copy(FieldName, Pos('[', FieldName) + 1, Length(FieldName));
+      FieldName := Copy(FieldName, 1, Pos(']', FieldName) - 1);
+      pName := FieldName;
+      Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - ParamName '+pName);
+      // Replace the field name with the corresponding value from the data source
+      pValue := '';
+      //field not prefixed with image if prefixed with image it will condiered as image field
+      if Not AnsiStartsText(cImageFieldPrefix, pName) then
+      begin
+        if pName<>'' then begin
+          //try to handle it with frxdataset instead of dbx and ado
+          if Assigned(frxDBXQuery) and Assigned(frxDBXQuery.Query.Fields.FindField(pName)) then
+            pValue := '[DBXQuery1."'+pName+'"]'
+          else if Assigned(frxADOQuery) and Assigned(frxADOQuery.Query.Fields.FindField(pName)) then
+            pValue := '[ADOQuery1."'+pName+'"]'
+          else
+            pValue := '';
+        end;
+        Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - ParamValue '+pValue);
+        if pValue <> '' then  //if pvalue <> '' the replace it or let it be
+          Result := StringReplace(Result, Match.Value, pValue, []);
+      end;
+    end;
+    //StrAfterP1pos := Copy(pContent, p1 + 1, length(pContent));
+    //Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - StrAfterP1pos '+StrAfterP1pos);
+    //iIdx := 1;
+    //while IsValidVariableName(StrAfterP1pos[iIdx]) do
+    //begin
+      //inc(iIdx);
+    //end;
+    //p2 := iIdx-1;
+    //Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Postion of p2 '+InttoStr(p2));
+    //pName := (Copy(pContent, p1 + 1, p2));
+    //Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - ParamName '+pName);
+    //pValue := '';
+    //if pName<>'' then begin
+      //try to handle it with frxdataset instead of dbx and ado
+    //  if Assigned(frxDBXQuery) and Assigned(frxDBXQuery.Query.Fields.FindField(pName)) then
+    //    pValue := '[DBXQuery1."'+pName+'"]'
+    //  else if Assigned(frxADOQuery) and Assigned(frxADOQuery.Query.Fields.FindField(pName)) then
+    //    pValue := '[ADOQuery1."'+pName+'"]'
+    //  else
+    //    pValue := '';
+    //end;
+    //Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - ParamValue '+pValue);
+    //Delete(pContent, p1, p2 + 1);
+    //if pValue = '' then
+    //  Insert(' '+pName, pContent, p1)//Added dummy string to avoid unwanted string replace in the original string
+    //else
+    //  Insert(pValue, pContent, p1);
+    //if pValue <> '' then
+    //begin
+    //  Delete(orgInputStr, p1, p2 + 1);
+    //  Insert(pValue, orgInputStr, p1);
+    //end;
+    //Axpro1.dbm.gf.DoDebug.msg('Data after Filling...');
+    //Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - pContent : '+pContent);
+    //Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - orgInputStr : '+orgInputStr);
+    Match := Match.NextMatch;
+  end;
+  //result := orgInputStr;
+  Axpro1.dbm.gf.DoDebug.msg('FillDynamicParamWithQueryColumn - Final result : '+result);
+end;
+
+
+(*
+//FillDynamicParams | RunTime replace  | | This is handled dynamic field like ':filedname'
+Function TAxfastRun.FillDynamicParams(pInputStr : String):String;
+var orgInputStr, SQLText, PName,pValue, S:String;
+    p1, p2, l , i, iIdx : integer;
+    StrAfterP1pos : String;
+begin
+  Result := pInputStr;
+  if (Trim(pInputStr) = '') or (pos(':', pInputStr) = 0) then exit;
+  orgInputStr := pInputStr;
+  axpro1.dbm.gf.DoDebug.msg('FillDynamicParams');
+  axpro1.dbm.gf.DoDebug.msg(orgInputStr);
+  while true do begin
+    p1 := pos(':', pInputStr);
+    If p1 = 0 Then break;
+    StrAfterP1pos := Copy(pInputStr, p1 + 1, length(pInputStr));
+    iIdx := 1;
+    while IsValidVariableName(StrAfterP1pos[iIdx]) do
+    begin
+      inc(iIdx);
+    end;
+    p2 := iIdx-1;
+    pName := (Copy(pInputStr, p1 + 1, p2));
+    pValue := '';
+    if pName<>'' then begin
+      if assigned(Parser) then
+      begin
+        pValue:=Parser.GetVarValue(pName);
+      end;
+      if pValue = '' then
+        pValue:=Storedata.GetFieldValue(pName,1);
+    end;
+    Delete(pInputStr, p1, p2 + 1);
+    if pValue = '' then
+      Insert(' '+pName, pInputStr, p1)//Added dummy string to avoid unwanted string replace in the original string
+    else
+      Insert(pValue, pInputStr, p1);
+    if pValue <> '' then
+    begin
+      Delete(orgInputStr, p1, p2 + 1);
+      Insert(pValue, orgInputStr, p1);
+    end;
+  end;
+  result := orgInputStr;
+end;
+*)
+
+//FillDynamicParams | RunTime replace  | | This is handled dynamic field like '{Field Name [fieldname]}'
+Function TAxfastRun.FillDynamicParams(pInputStr : String):String;
+var orgInputStr, SQLText, PName,pValue, S:String;
+    //p1, p2, l , i, iIdx : integer;
+    //StrAfterP1pos : String;
+
+    Regex: TRegEx;
+    Match: TMatch;
+    FieldName: string;
+begin
+  Result := pInputStr;
+  if (Trim(pInputStr) = '') or ((pos('{', pInputStr) = 0) and (pos('}', pInputStr) = 0)) then exit;
+  orgInputStr := pInputStr;
+  axpro1.dbm.gf.DoDebug.msg('FillDynamicParams');
+  axpro1.dbm.gf.DoDebug.msg(orgInputStr);
+
+  Regex := TRegEx.Create('{(.*?)}'); // Regular expression to match field names inside curly braces
+  Match := Regex.Match(pInputStr);
+
+  while Match.Success do
+  begin
+    FieldName := Match.Groups[1].Value;
+
+    //p1 := pos(':', pInputStr);
+    //If p1 = 0 Then break;
+    //StrAfterP1pos := Copy(pInputStr, p1 + 1, length(pInputStr));
+    //iIdx := 1;
+    //while IsValidVariableName(StrAfterP1pos[iIdx]) do
+    //begin
+      //inc(iIdx);
+    //end;
+    //p2 := iIdx-1;
+    //pName := (Copy(pInputStr, p1 + 1, p2));
+
+    // Check if the field name is in the format: "Field Name [fieldname]"
+    if Pos('[', FieldName) > 0 then
+    begin
+      FieldName := Copy(FieldName, Pos('[', FieldName) + 1, Length(FieldName));
+      FieldName := Copy(FieldName, 1, Pos(']', FieldName) - 1);
+
+      pName := FieldName;
+      //field not prefixed with image if prefixed with image it will condiered as image field
+      if Not AnsiStartsText(cImageFieldPrefix, pName) then
+      begin
+        pValue := '';
+        if pName<>'' then begin
+          if assigned(Parser) then
+          begin
+            pValue:=Parser.GetVarValue(pName);
+          end;
+          if pValue = '' then
+            pValue:=Storedata.GetFieldValue(pName,1);
+        end;
+        // Replace the field name with the corresponding value from the data source
+        if pValue <> '' then
+          Result := StringReplace(Result, Match.Value, pValue, []);
+      end;
+    end;
+
+
+    //Delete(pInputStr, p1, p2 + 1);
+    //if pValue = '' then
+    //  Insert(' '+pName, pInputStr, p1)//Added dummy string to avoid unwanted string replace in the original string
+    //else
+    //  Insert(pValue, pInputStr, p1);
+    //if pValue <> '' then
+    //begin
+    //  Delete(orgInputStr, p1, p2 + 1);
+    //  Insert(pValue, orgInputStr, p1);
+    //end;
+
+    Match := Match.NextMatch;
+  end;
+  //result := orgInputStr;
+  axpro1.dbm.gf.DoDebug.msg('FillDynamicParams/ Result '+result);
+end;
+
+//setFrxPageProperties
+Procedure TAxFastRun.setFrxPageProperties(pXDS : TXDS;pfrxReportPage : TfrxReportPage);
+var
+  sPaperSize,sPaperWidth,sPaperHeight : String;
+  iPaperSize : Integer;
+begin
+  Axpro1.dbm.gf.DoDebug.Msg('setFrxPageProperties starts... ');
+  try
+    sPaperSize := '';
+    sPaperWidth := '';
+    sPaperHeight := '';
+    try
+      (*
+      sPaperSize := LowerCase(pXDS.CDS.FieldByName('Page_Size').AsString);
+      sPaperWidth := pXDS.CDS.FieldByName('Page_Width').AsString;
+      sPaperHeight := pXDS.CDS.FieldByName('Page_Height').AsString;
+      *)
+      sPaperSize := LowerCase(pXDS.CDS.FieldByName('Paper_Size').AsString);
+      sPaperWidth := pXDS.CDS.FieldByName('Paper_Width').AsString;
+      sPaperHeight := pXDS.CDS.FieldByName('Paper_Height').AsString;
+      //https://www.agooddaytoprint.com/page/paper-size-chart-faq
+      if (sPaperSize <> '') and (sPaperWidth <> '') and (sPaperHeight <> '') then
+      begin
+        if sPaperSize = 'a4' then
+          iPaperSize := DMPAPER_A4
+        else if sPaperSize = 'a5' then
+          iPaperSize := DMPAPER_A5
+        else if sPaperSize = 'letter' then
+          iPaperSize := DMPAPER_LETTER
+        else if sPaperSize = 'legal' then
+          iPaperSize := DMPAPER_LEGAL
+        else if sPaperSize = 'executive' then
+          iPaperSize := DMPAPER_EXECUTIVE
+        else if sPaperSize = 'ledger' then
+          iPaperSize := DMPAPER_LEDGER
+        else if sPaperSize = 'custom' then
+          iPaperSize := DMPAPER_USER;
+        (*
+        else if sPaperSize = 'statement' then
+          iPaperSize := DMPAPER_STATEMENT
+        else if sPaperSize = 'a3' then
+          iPaperSize := DMPAPER_A3
+        else if sPaperSize = 'a2' then
+          iPaperSize := DMPAPER_A2
+        else if sPaperSize = 'a6' then
+          iPaperSize := DMPAPER_A6;
+        *)
+        pfrxReportPage.PaperSize := iPaperSize;
+
+        pfrxReportPage.PaperWidth := StrtoFloat(sPaperWidth);
+        pfrxReportPage.PaperHeight := StrtoFloat(sPaperHeight);
+      end;
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in setFrxPageProperties : '+E.Message);
+    end;
+  finally
+
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('setFrxPageProperties ends. ');
+end;
+
+
+//SetFrxViewHeight
+Procedure TAxFastRun.SetFrxViewHeight(pXDS : TXDS;pFieldName : String;pFrxView : TFrxView);
+var
+  sfrxCompHeightField,sfrxCompHeight : String;
+  frxCompHeight : Extended;
+  fField : TField;
+begin
+  Axpro1.dbm.gf.DoDebug.Msg('SetFrxViewHeight starts... ');
+  fField := nil;
+  sfrxCompHeight := '';
+  frxCompHeight := 0;
+  try
+    try
+    sfrxCompHeightField := pFieldName+'_height';
+    fField := pXDS.CDS.FindField(sfrxCompHeightField);
+    if Assigned(fField) then
+    begin
+      sfrxCompHeight := fField.AsString;
+      if sfrxCompHeight <> '' then
+        frxCompHeight := StrtoFloat(sfrxCompHeight);
+      if (frxCompHeight > 0) and Assigned(pFrxView) then
+      begin
+        pFrxView.Height := frxCompHeight;
+        if {(pFrxView.HasParent) and} Assigned(pFrxView.Parent) and (pFrxView.Parent.Height < frxCompHeight) then
+          pFrxView.Parent.Height := frxCompHeight;
+
+	      (*
+	      FR designer takes all measurements in CM
+	      But through progmatically we could assign the values in Pixel
+
+	      Convert Centimeter to Pixel (X)
+	        1 cm = 37.7952755906 pixel (X)
+	        1 pixel (X) = 0.0264583333 cm
+
+	        Example: convert 10 cm to pixel (X):
+	        10 cm = 10 × 37.7952755906 pixel (X) = 377.952755906 pixel (X)
+	      *)
+      end;
+    end;
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in SetFrxViewHeight '+E.Message);
+    end;
+  finally
+    fField := nil;
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('SetFrxViewHeight ends. ');
+end;
+
+
+//SetFrxViewWidth
+Procedure TAxFastRun.SetFrxViewWidth(pXDS : TXDS;pFieldName : String;pFrxView : TFrxView);
+var
+  sfrxCompWidthField,sfrxCompWidth : String;
+  frxCompWidth : Extended;
+  fField : TField;
+begin
+  Axpro1.dbm.gf.DoDebug.Msg('SetFrxViewWidth starts... ');
+  fField := nil;
+  sfrxCompWidth := '';
+  frxCompWidth := 0;
+  try
+    try
+    sfrxCompWidthField := pFieldName+'_width';
+    fField := pXDS.CDS.FindField(sfrxCompWidthField);
+    if Assigned(fField) then
+    begin
+      sfrxCompWidth := fField.AsString;
+      if sfrxCompWidth <> '' then
+        frxCompWidth := StrtoFloat(sfrxCompWidth);
+      if (frxCompWidth > 0) and Assigned(pFrxView) then
+      begin
+        pFrxView.Width := frxCompWidth;
+        if {(pFrxView.HasParent) and} Assigned(pFrxView.Parent) and (pFrxView.Parent.Width < frxCompWidth) then
+          pFrxView.Parent.Width := frxCompWidth;
+
+	      (*
+	      FR designer takes all measurements in CM
+	      But through progmatically we could assign the values in Pixel
+
+	      Convert Centimeter to Pixel (X)
+	        1 cm = 37.7952755906 pixel (X)
+	        1 pixel (X) = 0.0264583333 cm
+
+	        Example: convert 10 cm to pixel (X):
+	        10 cm = 10 × 37.7952755906 pixel (X) = 377.952755906 pixel (X)
+	      *)
+      end;
+    end;
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in SetFrxViewWidth '+E.Message);
+    end;
+  finally
+    fField := nil;
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('SetFrxViewWidth ends. ');
+end;
+
+
+//GetFileUsingPattern
+Function TAxFastRun.GetFileUsingPattern(pFilePathWithPattern : String) : string;
+  var rfile,s,sFilePath: String;
+      sr: TSearchRec;
+begin
+  result := '';
+  Axpro1.dbm.gf.DoDebug.Msg('GetFileUsingPattern starts... ');
+  try
+    rfile := pFilePathWithPattern;
+    sFilePath := ExtractFilePath(rfile);
+    sFilePath := IncludeTrailingBackslash(sFilePath);
+    Axpro1.dbm.gf.DoDebug.Msg('GetFileUsingPattern/ Search pattern : '+rfile);
+    Axpro1.dbm.gf.DoDebug.Msg('GetFileUsingPattern/ Search FilePath : '+sFilePath);
+    if (findfirst(rfile, faAnyFile, sr) = 0) then
+    begin
+      repeat
+        if (sr.Name = '.') or (sr.Name = '..') then continue;
+        s := sr.name;
+        result := sFilePath+s;
+        Axpro1.dbm.gf.DoDebug.Msg('GetFileUsingPattern/result '+result);
+        break;
+      until FindNext(sr) <> 0;
+      System.SysUtils.FindClose(sr);
+    end;
+  Except on E:Exception do
+    Axpro1.dbm.gf.DoDebug.Msg('Error in GetFileUsingPattern '+E.Message);
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('GetFileUsingPattern ends. ');
+end;
+
+//GetValue
+Function TAxFastRun.GetValue(pVName : String):String;
+begin
+  try
+  result := '';
+  Axpro1.dbm.gf.DoDebug.Msg('GetValue starts... ');
+  if pVName<>'' then begin
+    if assigned(Parser) then
+    begin
+      result :=Parser.GetVarValue(pVName);
+    end;
+    if result = '' then
+      result :=Storedata.GetFieldValue(pVName,1);
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('GetValue ends. ');
+  finally
+
+  end;
+end;
+
+//SetFrxAppTitle
+Procedure TAxFastRun.SetFrxAppTitle(pfrxHTMLView : TfrxHtmlView;pXDS:TXDS);
+var
+  sAppTitle, sAppSubTitle, sAppLogo : String;
+  sHTMLcode,sImgSrcHTMLCode,ReportTitle_AppContent : String;
+  bAppTitle, bAppSubTitle, bAppLogo : Boolean;
+begin
+  //Exit;
+  //As of now exit from this proc. Once complete functionality is ready we can enable this and check.
+  Axpro1.dbm.gf.DoDebug.Msg('SetFrxAppTitle starts... ');
+  sAppSubTitle := '';
+  ReportTitle_AppContent := '';
+  sImgSrcHTMLCode := '';
+  bAppTitle := False;
+  bAppSubTitle := False;
+  bAppLogo := False;
+  if Assigned(pfrxHTMLView) then
+  begin
+    bAppTitle := lowercase(pXDS.CDS.FieldByName('print_app_title').AsString) = 't';
+    bAppSubTitle := lowercase(pXDS.CDS.FieldByName('print_app_subtitle').AsString) = 't';
+    bAppLogo := lowercase(pXDS.CDS.FieldByName('print_app_logo').AsString) = 't';
+
+
+      if bAppTitle then
+      begin
+        //At runtime AppTitle has to be replaced so adding it as dynamic param
+        sAppTitle := '{AppTitle [AppTitle]}';
+        ReportTitle_AppContent := '<h1 style="font-family:verdana; font-size: 24px; text-align: center;">'+sAppTitle+'</h1>';
+      end;
+
+      if bAppSubTitle then
+      begin
+        sAppSubTitle := '{AppSubTitle [AppSubTitle]}';
+        ReportTitle_AppContent := ReportTitle_AppContent + '<h2 style="font-family:verdana; font-size: 20px; text-align: center;">'+sAppSubTitle+'</h2>';
+      end;
+
+      if bAppLogo then
+      begin
+        sAppLogo := '{AppLogo [AppLogo]}';
+        sImgSrcHTMLCode := '<div style="text-align: center;">';
+        sImgSrcHTMLCode := sImgSrcHTMLCode + '<img src="'+sAppLogo+'" style="display: block; margin: 0 auto; height: 75px; width: 75px;" alt="Logo">';
+        sImgSrcHTMLCode := sImgSrcHTMLCode+'</div>';
+        (*
+        sImgSrcHTMLCode := '<div style="display: flex; justify-content: center; align-items: center; height: 100vh;">';
+        sImgSrcHTMLCode := sImgSrcHTMLCode+' <img src="'+sAppLogo+'"  style="width="100" height="100"" alt="Centered Image">';
+        sImgSrcHTMLCode := sImgSrcHTMLCode+'</div>';
+        *)
+      end;
+
+      pfrxHTMLView.HTMLViewer.Text := sImgSrcHTMLCode+ReportTitle_AppContent+pfrxHTMLView.HTMLViewer.Text;
+
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('SetFrxAppTitle ends. ');
+end;
+
+
+//QueryContainsField | Runtime
+function {TAxFastRun.}QueryContainsField(Query: TfrxDBDataset; FieldName: string;Var bIsBlob : Boolean): Boolean;
+var
+  I: Integer;
+  sQueryField : String;
+begin
+  Result := False;
+  //.dbm.gf.DoDebug.Msg('QueryContainsField starts...');
+  //Axpro1.dbm.gf.DoDebug.Msg('Checking for field : '+FieldName);
+  // Iterate over the DataFields of the query component
+  for I := 0 to Query.Dataset.FieldCount - 1 do
+  begin
+    // Check if the field name matches
+    sQueryField := Query.Dataset.Fields[I].FieldName;
+    //Axpro1.dbm.gf.DoDebug.Msg('Field'+InttoStr(I)+' : '+sQueryField);
+    if CompareText(sQueryField, FieldName) = 0 then
+    begin
+      bIsBlob := GetFieldType(Query.Dataset.Fields[I].DataType) = 'i';
+      Result := True;
+      //Axpro1.dbm.gf.DoDebug.Msg('Field found.');
+      Exit;
+    end;
+  end;
+  //Axpro1.dbm.gf.DoDebug.Msg('QueryContainsField ends.');
+end;
+
+
+//PictureObjectBeforePrint | Runtime
+procedure TAxFastRun.frxReportOnReportPrint(Sender: TfrxComponent);//PictureObjectBeforePrint(Sender: TfrxComponent);
+var
+  PictureObject: TfrxPictureView;
+  FieldName: string;
+  FieldValue: Variant;
+
+  sFrxQueryComponent : String;
+  bIsDBX : Boolean;
+  frxDBXQuery : TfrxDBXQuery;
+  frxADOQuery : TfrxADOQuery;
+  frxDBComponent : TfrxComponent;
+  //frxPrimaryDataSet : TfrxDataSet;
+  ReportComponent: TfrxComponent;
+
+  PictureValue: TPicture;
+  MemoryStream: TMemoryStream;
+  BlobData: TBytes;
+
+  I : Integer;
+
+function VarArrayToBytes(const V: Variant): TBytes;
+var
+  P: Pointer;
+  L: Integer;
+begin
+  L := VarArrayHighBound(V, 1) - VarArrayLowBound(V, 1) + 1;
+  SetLength(Result, L);
+  P := VarArrayLock(V);
+  try
+    Move(P^, Result[0], L);
+  finally
+    VarArrayUnlock(V);
+  end;
+end;
+
+
+function IsBlobField(FieldValue: Variant): Boolean;
+begin
+  Result := (VarType(FieldValue) and varArray) = varArray;
+  if Result then
+    Result := (VarType(FieldValue) and varByte) = varByte;
+end;
+
+function IsValidFilePath(const FilePath: string): Boolean;
+var
+  TempPath: string;
+begin
+  try
+    TempPath := ExpandFileName(FilePath);
+    Result := DirectoryExists(ExtractFileDir(TempPath));
+  except
+    Result := False;
+  end;
+end;
+
+begin
+  Try
+  Axpro1.dbm.gf.DoDebug.Msg('PictureObjectBeforePrint starts... ');
+  try
+  //frxDataSet need to be created in private scope and only one time it should
+  //be created.
+  PictureValue := TPicture.Create;
+  //The below code can be moved into AsisgnPictureObjectEvent and frxDataSet can be created as private var
+  //to avoid redundant execution
+  if Axpro1.dbm.connection.dbtype = 'ms sql' then
+    bIsDBX := False
+  else //Other DB's postgres,mysql,oracle
+    bIsDBX := True;
+  //We will be having only one masterdatasource so we are checking initial datasource here.
+  //Find and Load DataSet
+  if Not bIsDBX then
+    sFrxQueryComponent := 'ADOQuery1'
+  else
+    sFrxQueryComponent := 'DBXQuery1';
+  frxDBComponent := frxReport.FindObject(sFrxQueryComponent);
+  if Assigned(frxDBComponent) then
+  begin
+    if Not bIsDBX then
+      frxPrimaryDataSet := TfrxADOQuery(frxDBComponent)
+    else
+      frxPrimaryDataSet := TfrxDBXQuery(frxDBComponent);
+  end;
+  ReportComponent := Sender;
+
+  //for I := 0 to ReportComponent.Objects.Count - 1 do
+  //begin
+  if TfrxComponent({ReportComponent.Objects[I]}ReportComponent) is TfrxPictureView then
+  begin
+  // Cast the sender to TfrxPictureView
+  PictureObject := TfrxPictureView(ReportComponent{ReportComponent.Objects[I]});
+
+  // Get the field name from the PictureObject's DataSetFieldName property
+  FieldName := PictureObject.DataField;//SetFieldName;
+
+  if (FieldName <> '') then
+  begin
+    //if QueryContainsField(TfrxDBDataset(frxPrimaryDataSet),FieldName) then
+      // Get the field value based on the field name from your data source
+      FieldValue := frxPrimaryDataSet.Value[FieldName];//frxDataSet.FieldByName(FieldName).Value;
+  end;
+  // Assign the value to the PictureObject or perform any necessary processing
+  // Check if the field value is of Blob (image) type
+  if IsBlobField(FieldValue) then
+  begin
+    Axpro1.dbm.gf.DoDebug.Msg('PictureObjectBeforePrint/Assigning the Blob field value to the PictureObject.');
+    // Assign the Blob field value to the PictureObject
+    // Convert the field value to a stream and load it into the picture
+    // assuming FieldValue is of type TBlobField
+    //TBlobField(FieldValue).SaveToStream(PictureValue.Bitmap);
+    //PictureObject.Picture.Assign(PictureValue);
+
+    // Assign the blob field value to the PictureObject
+    //PictureValue.LoadFromStream(TMemoryStream(FieldValue));
+    //PictureObject.Picture.Assign(PictureValue);
+    //PictureObject.LoadPictureFromStream(TMemoryStream(FieldValue));
+
+      // Convert the field value to a byte array
+      BlobData := VarArrayToBytes(FieldValue);
+
+      // Create a new memory stream and load the blob field value into it
+      MemoryStream := TMemoryStream.Create;
+      try
+        //MemoryStream.Write(FieldValue[0], VarArrayHighBound(FieldValue, 1) - VarArrayLowBound(FieldValue, 1) + 1);
+        MemoryStream.WriteBuffer(BlobData[0], Length(BlobData));
+        MemoryStream.Position := 0;
+
+        // Load the memory stream into the picture
+        PictureValue.Bitmap.LoadFromStream(MemoryStream);
+        PictureObject.Picture.Assign(PictureValue);
+      finally
+        MemoryStream.Free;
+      end;
+  end
+  else if VarIsStr(FieldValue) then
+  begin
+    // Handle string field value
+    // Assign the string value to the PictureObject or perform any necessary processing
+    if IsValidFilePath(FieldValue) then
+      PictureObject.Picture.LoadFromFile(FieldValue)
+    else
+      Axpro1.dbm.gf.DoDebug.Msg('PictureObjectBeforePrint/'+FieldValue+' is not valid path.');
+  end;
+
+  // Clear the field value to avoid displaying it as text in the report
+  PictureObject.DataField{SetFieldValue} := '';
+  end;
+  //end;
+
+  Except on E:Exception do
+  begin
+    Axpro1.dbm.gf.DoDebug.Msg('PictureObjectBeforePrint/Error : '+E.Message);
+  end;
+  end;
+
+  finally
+    PictureValue.Free;
+  end;
+
+  Axpro1.dbm.gf.DoDebug.Msg('PictureObjectBeforePrint ends. ');
+end;
+
+procedure Picture1OnBeforePrint1(Sender: TfrxComponent);
+begin
+ //
+end;
+
+procedure frxReportOnReportPrint(Sender: TfrxReportComponent);
+begin
+  // Your code to handle the OnReportPrint event
+end;
+
+
+function FindDatasetByName(Report: TfrxReport; DatasetName: string): TfrxCustomDBDataset;
+var
+  i: Integer;
+  Dataset: TfrxCustomDBDataset;
+begin
+  Result := nil;
+
+  // Iterate through the report's data sets collection
+  for i := 0 to Report.DataSets.Count - 1 do
+  begin
+    Dataset := TfrxCustomDBDataset(Report.DataSets[i]);
+    try
+      // Check if the dataset name matches the provided name
+      if SameText(Dataset.Name, DatasetName) then
+      begin
+        Result := Dataset;
+        Break;
+      end;
+    except on e:Exception do
+      //ShowMessage(E.Message);
+    end;
+  end;
+end;
+
+
+function IsValidFilePath(const FilePath: string): Boolean;
+var
+  TempPath: string;
+begin
+  try
+    TempPath := ExpandFileName(FilePath);
+    result := DirectoryExists(ExtractFileDir(TempPath));
+  except
+    result := False;
+  end;
+end;
+
+procedure TAxfastRun.frxReport1BeforePrint(Sender: TfrxReportComponent);
+var
+  PictureObject: TfrxPictureView;
+  FieldName: string;
+  FieldValue: Variant;
+
+  sFrxQueryComponent: String;
+  bIsDBX: Boolean;
+  frxDBXQuery: TfrxDBXQuery;
+  frxADOQuery: TfrxADOQuery;
+  frxDBComponent: TfrxComponent;
+  //frxPrimaryDataSet: TfrxDataSet;
+  ReportComponent: TfrxComponent;
+
+  PictureValue: TPicture;
+  MemoryStream: TMemoryStream;
+  stm: TStringStream;
+  BlobData: TBytes;
+
+  i: Integer;
+  sAxpImagePath, sImagePath, sImageFile, sRecordId: String;
+
+  sFastPrint_TransId: String;
+  //frxCustomDBDataset: TfrxCustomDBDataset;
+  bIsBlob : Boolean;
+
+  function VarArrayToBytes(const V: Variant): TBytes;
+  var
+    p: Pointer;
+    L: Integer;
+  begin
+    L := VarArrayHighBound(V, 1) - VarArrayLowBound(V, 1) + 1;
+    SetLength(result, L);
+    p := VarArrayLock(V);
+    try
+      Move(p^, result[0], L);
+    finally
+      VarArrayUnlock(V);
+    end;
+  end;
+
+  function IsBlobField(FieldValue: Variant): Boolean;
+  begin
+    result := (VarType(FieldValue) and varArray) = varArray;
+    if result then
+      result := (VarType(FieldValue) and varByte) = varByte;
+  end;
+
+//  function IsValidFilePath(const FilePath: string): Boolean;
+//  var
+//    TempPath: string;
+//  begin
+//    try
+//      TempPath := ExpandFileName(FilePath);
+//      result := DirectoryExists(ExtractFileDir(TempPath));
+//    except
+//      result := False;
+//    end;
+//  end;
+
+begin
+  Try
+    Axpro1.dbm.gf.DoDebug.Msg('frxReport1BeforePrint starts... ');
+    try
+      bIsBlob := False;
+      sFastPrint_TransId := storedata.TransType;
+      PictureValue := TPicture.create;
+      if Not Assigned(frxPrimaryDataSet) then
+      begin
+        // The below code can be moved into AsisgnPictureObjectEvent and frxDataSet can be created as private var
+        // to avoid redundant execution
+        if Axpro1.dbm.Connection.DbType = 'ms sql' then
+          bIsDBX := False
+        else // Other DB's postgres,mysql,oracle
+          bIsDBX := True;
+        // We will be having only one masterdatasource so we are checking initial datasource here.
+        // Find and Load DataSet
+        if Not bIsDBX then
+          sFrxQueryComponent := 'ADOQuery1'
+        else
+          sFrxQueryComponent := 'DBXQuery1';
+        frxDBComponent := frxReport.FindObject(sFrxQueryComponent);
+        if assigned(frxDBComponent) then
+        begin
+          if Not bIsDBX then
+          begin
+            // Open the dataset associated with the ADOQuery component
+            TfrxADOQuery(frxDBComponent).DataSet.Open;
+            frxPrimaryDataSet := TfrxADOQuery(frxDBComponent);
+          end
+          else
+          begin
+            // Open the dataset associated with the DBXQuery component
+            TfrxDBXQuery(frxDBComponent).DataSet.Open;
+            frxPrimaryDataSet := TfrxDBXQuery(frxDBComponent);
+          end;
+        end;
+
+        //frxCustomDBDataset := FindDatasetByName(frxReport,sFrxQueryComponent);
+      end;
+      frxPrimaryDataSet.First;
+      ReportComponent := Sender;
+      //for i := 0 to ReportComponent.Objects.Count - 1 do
+      //begin  //ReportComponent.classname
+        if TfrxComponent({ReportComponent.Objects[i]}ReportComponent) is TfrxPictureView then
+        begin
+          // Cast the sender to TfrxPictureView
+          PictureObject := TfrxPictureView({ReportComponent.Objects[i]}ReportComponent);
+
+          // Get the field name from the PictureObject's DataSetFieldName property
+          FieldName := PictureObject.DataField; // SetFieldName;
+
+          if (FieldName <> '') then
+          begin
+            sRecordId := FloattoStr(storedata.LastSavedRecordId);
+            // If the field is from Query field / DataSet field
+            if QueryContainsField(TfrxDBDataset(frxPrimaryDataSet), FieldName,bIsBlob) then
+            begin
+              // Get the field value based on the field name from your data source
+              FieldValue := frxPrimaryDataSet.Value[FieldName];
+              // frxDataSet.FieldByName(FieldName).Value;
+
+              // Assign the value to the PictureObject or perform any necessary processing
+              // Check if the field value is of Blob (image) type
+              if bIsBlob{IsBlobField(FieldValue)} then
+              begin
+                Axpro1.dbm.gf.DoDebug.Msg
+                  ('frxReport1BeforePrint/Assigning the Blob field value to the PictureObject.');
+                // Assign the Blob field value to the PictureObject
+                // Convert the field value to a stream and load it into the picture
+                // assuming FieldValue is of type TBlobField
+                // TBlobField(FieldValue).SaveToStream(PictureValue.Bitmap);
+                // PictureObject.Picture.Assign(PictureValue);
+
+                // Assign the blob field value to the PictureObject
+                // PictureValue.LoadFromStream(TMemoryStream(FieldValue));
+                // PictureObject.Picture.Assign(PictureValue);
+                // PictureObject.LoadPictureFromStream(TMemoryStream(FieldValue));
+
+                // Convert the field value to a byte array
+               //BlobData := VarArrayToBytes(FieldValue);
+
+                // Create a new memory stream and load the blob field value into it
+                MemoryStream := TMemoryStream.create;
+                try
+                  // MemoryStream.Write(FieldValue[0], VarArrayHighBound(FieldValue, 1) - VarArrayLowBound(FieldValue, 1) + 1);
+                  //MemoryStream.WriteBuffer(BlobData[0], length(BlobData));
+                  //MemoryStream.Position := 0;
+
+                  //TfrxDBDataset(frxPrimaryDataSet).DataSet.fiel
+                  TBlobField(TfrxDBDataset(frxPrimaryDataSet).DataSet.FieldByName(FieldName)).SaveToStream(MemoryStream);
+
+                  // Load the memory stream into the picture
+                  //PictureValue.Bitmap.LoadFromStream(MemoryStream);
+                  //PictureObject.Picture.Assign(PictureValue);
+                  if assigned(MemoryStream) and (MemoryStream.Size > 0) then
+                  begin
+                    MemoryStream.Position := 0;
+                    PictureObject.LoadPictureFromStream(MemoryStream);
+                  end;
+                finally
+                  MemoryStream.Free;
+                end;
+              end
+              else {if VarIsStr(FieldValue) then }
+              begin
+                // Handle string field value
+                // Assign the string value to the PictureObject or perform any necessary processing
+                if IsValidFilePath(FieldValue) then
+                  PictureObject.Picture.LoadFromFile(FieldValue)
+                else
+                  Axpro1.dbm.gf.DoDebug.Msg('frxReport1BeforePrint/' +
+                    FieldValue + ' is not valid path.');
+              end;
+
+            end
+            else
+            begin
+              // if the field is from Form
+              if storedata.structdef.GetField(FieldName) <> nil then
+              begin
+                try
+                  sAxpImagePath := parser.GetVarValue('AxpImagePath');
+                  // GetAxpImgPath;
+                  if sAxpImagePath <> '' then
+                    sAxpImagePath := IncludeTrailingBackslash(sAxpImagePath);
+                  Axpro1.dbm.gf.DoDebug.Msg
+                    ('SetFRObjectProps/ Values of AxpImagePath : ' +
+                    sAxpImagePath);
+                  Axpro1.dbm.gf.DoDebug.Msg
+                    ('SetFRObjectProps/ Values of ImageFromDB : ' +
+                    BoolToStr(Axpro1.dbm.gf.bImageFromDB));
+                  (*
+                    if sAxpImagePath = '' then
+                    sAxpImagePath := Parser.GetVarValue('AxpImageServer');//GetAxpImgServer;
+                  *)
+                  //bImageFromDB := True; // to Test
+                  if (Axpro1.dbm.gf.bImageFromDB) or (sAxpImagePath = '')
+                  then // read from DB
+                  begin
+                    // Read from Image Table
+                    Axpro1.dbm.gf.DoDebug.Msg
+                      ('SetFRObjectProps/ Loading image from Table ' +
+                      sFastPrint_TransId + FieldName + '. Recordid : ' +
+                      sRecordId);
+                    With Axpro1.dbm.GetXds(nil) do
+                    begin
+                      buffered := True;
+                      CDS.CommandText := 'select img from ' + sFastPrint_TransId
+                        + FieldName + ' where recordid = ' + sRecordId;
+                      open;
+                      if CDS.RecordCount > 0 then
+                      begin
+                        stm := TStringStream.create;
+                        TBlobField(CDS.FieldByName('img')).SaveToStream(stm);
+                        if assigned(stm) and (stm.Size > 0) then
+                          PictureObject.LoadPictureFromStream(stm);
+                      end
+                      else
+                        PictureObject.Visible := False;
+                      Free;
+                    end;
+                  end
+                  else // Read from Path
+                  begin
+                    sImagePath := sAxpImagePath + sFastPrint_TransId + '\' +
+                      FieldName + '\';
+                    Axpro1.dbm.gf.DoDebug.Msg
+                      ('SetFRObjectProps/ Loading image from path : ' +
+                      sImagePath + '. Recordid : ' + sRecordId);
+                    sImageFile := GetFileUsingPattern
+                      (sImagePath + sRecordId + '.*');
+                    if sImageFile <> '' then
+                      PictureObject.Picture.LoadFromFile(sImageFile)
+                    else
+                      PictureObject.Visible := False;
+                  end;
+                  // sDataField := sPictureDataField;
+                  // frxPictureView.DataField := sDataField;
+                  // frxView := frxPictureView;
+                except
+                  on e: Exception do
+                    Axpro1.dbm.gf.DoDebug.Msg
+                      ('SetFRObjectProps/ Error while loading image/ ' +
+                      FieldName + ' : ' + e.Message);
+                end;
+              end
+              else // if global var
+              begin
+                begin
+                  sImageFile := GetValue(FieldName);
+                  Axpro1.dbm.gf.DoDebug.Msg
+                    ('SetFRObjectProps/ Loading image from : ' + sImageFile);
+                  if sImageFile <> '' then
+                    PictureObject.Picture.LoadFromFile(sImageFile)
+                  else
+                    PictureObject.Visible := False;
+                end;
+                // sDataField := sPictureDataField;
+                // frxPictureView.DataField := sDataField;
+                // frxView := frxPictureView;
+              end;
+
+            end;
+          end
+          else
+            PictureObject.Visible := False;
+
+          // Clear the field value to avoid displaying it as text in the report
+          PictureObject.DataField { SetFieldValue } := '';
+        end
+        else if TfrxComponent(ReportComponent) is TfrxHtmlView then //HTMLView
+        begin
+          Axpro1.dbm.gf.DoDebug.Msg('frxReport1BeforePrint/Processing frxHtmlView...');
+          SetHTMLImgSrcForDynamicFields(TfrxHtmlView(ReportComponent));
+        end;
+      //end;
+
+
+    Except
+      on e: Exception do
+      begin
+        Axpro1.dbm.gf.DoDebug.Msg('frxReport1BeforePrint/Error : ' + e.Message);
+      end;
+    end;
+
+  finally
+    PictureValue.Free;
+  end;
+
+  Axpro1.dbm.gf.DoDebug.Msg('frxReport1BeforePrint ends. ');
+end;
+
+////GetStreamMimeType
+//function GetStreamMimeType(const stream: TStream): string;
+//var
+//  buffer: TArray<System.Byte>;
+//begin
+//  SetLength(buffer, 256); // Adjust buffer size as needed
+//
+//  stream.Position := 0;
+//  stream.ReadBuffer(buffer[0], Length(buffer));
+//
+//  Result := TIdMIME.GetFileMIMEType(buffer);
+//end;
+
+function GetStreamMimeType(extension: string): string;
+begin
+  if SameText(extension, '.jpg') or SameText(extension, '.jpeg') then
+    Result := 'image/jpeg'
+  else if SameText(extension, '.png') then
+    Result := 'image/png'
+  else if SameText(extension, '.gif') then
+    Result := 'image/gif'
+  else
+    Result := 'application/octet-stream'; // Default MIME type for unknown file types
+end;
+
+//StreamToBase64
+function StreamToBase64(const stream: TStream): string;
+var
+  base64Stream: TStringStream;
+begin
+  base64Stream := TStringStream.Create('');
+  try
+    EncodeStream(stream, base64Stream);
+    Result := StringReplace(base64Stream.DataString, sLineBreak, '', [rfReplaceAll]);//base64Stream.DataString;
+  finally
+    base64Stream.Free;
+  end;
+end;
+
+//GetBase64ImageFromStream
+function GetBase64ImageFromStream(Stream: TStream): string;
+var
+  MemoryStream: TMemoryStream;
+begin
+  MemoryStream := TMemoryStream.Create;
+  try
+    Stream.Position := 0;
+    MemoryStream.CopyFrom(Stream, 0);
+    MemoryStream.Position := 0;
+    //sMIMEType := GetStreamMimeType(Stream);
+    //sMIMEType := 'application/octet-stream';
+    //Result := 'data:'+sMIMEType+';base64,' + EncodeBase64(MemoryStream.Memory, MemoryStream.Size);
+    //Result := 'data:'+sMIMEType+';base64,' + StreamToBase64(MemoryStream);
+    Result := StreamToBase64(MemoryStream);
+    //Showmessage(Result);
+  finally
+    MemoryStream.Free;
+  end;
+end;
+
+//GetBase64ImageFromFile
+function GetBase64ImageFromFile(FilePath: string): string;
+var
+  FileStream: TFileStream;
+begin
+  FileStream := TFileStream.Create(FilePath, fmOpenRead or fmShareDenyWrite);
+  try
+    Result := GetBase64ImageFromStream(FileStream);
+  finally
+    FileStream.Free;
+  end;
+end;
+
+//PrepareHtmlImgTag
+function PrepareHtmlImgTag(Base64Image,extension: string; Height, Width: Integer): string;
+var
+  sMIMEType : String;
+begin
+  if Height = 0 then
+    Height := 100;
+  if Width = 0 then
+    Width := 0;
+  if extension = '' then
+      sMIMEType := 'image/jpeg'
+  else
+    sMIMEType := GetStreamMimeType(extension);
+  Result := '<img src="' + 'data:'+sMIMEType+';base64,' + Base64Image + '" alt="Base64 Image" style="height: ' + IntToStr(Height) + 'px; width: ' + IntToStr(Width) + 'px;">';
+end;
+
+
+function GetFieldValueFromFrxDBDataset(dataset: TfrxDBDataset; const pfieldName: string): Variant;
+var
+  bIsBlob : Boolean;
+begin
+  Result := Null; // Default value if field is not found or dataset is not assigned
+  // Check if dataset is assigned and field exists
+  //if Assigned(dataset) and dataset.DataSet.Active and (dataset.DataSet.FindField(fieldName) <> nil) then
+  if QueryContainsField(dataset,pfieldName,bIsBlob) then
+  begin
+    // Retrieve the field value
+    Result := dataset.DataSet.FieldByName(pfieldName).Value;
+  end;
+end;
+
+
+//SetHTMLImgSrc
+Function TAxFastRun.PrepareHTMLImgSrc(pFieldName : String):String;
+var
+  sRecordId,FieldName,FieldValue,sAxpImagePath,sImagePath,sImageFile : String;
+  bIsBlob : Boolean;
+
+  MemoryStream : TMemoryStream;
+  sExtension,sHeight,sWidth : String;
+  iHeight,iWidth : Integer;
+  //stm : TStringStream;
+begin
+try
+  result := '';
+  Axpro1.dbm.gf.DoDebug.Msg('PrepareHTMLImgSrc starts...');
+  FieldName := pFieldName;
+  Axpro1.dbm.gf.DoDebug.Msg('PrepareHTMLImgSrc/ FieldName '+FieldName);
+  if (FieldName <> '') then
+  begin
+    sRecordId := FloattoStr(storedata.LastSavedRecordId);
+    Axpro1.dbm.gf.DoDebug.Msg('PrepareHTMLImgSrc/ RecordId '+sRecordId);
+    // If the field is from Query field / DataSet field
+    Axpro1.dbm.gf.DoDebug.Msg('Checking query field.');
+    if QueryContainsField(TfrxDBDataset(frxPrimaryDataSet), FieldName,bIsBlob) then
+    begin
+      // Get the field value based on the field name from your data source
+      FieldValue := frxPrimaryDataSet.Value[FieldName];
+      // Check if the field value is of Blob (image) type
+      if bIsBlob{IsBlobField(FieldValue)} then
+      begin
+        Axpro1.dbm.gf.DoDebug.Msg
+          ('frxReport1BeforePrint/Assigning the Blob field value to the PictureObject.');
+        MemoryStream := nil;
+        // Create a new memory stream and load the blob field value into it
+        MemoryStream := TMemoryStream.create;
+        try
+          TBlobField(TfrxDBDataset(frxPrimaryDataSet).DataSet.FieldByName(FieldName)).SaveToStream(MemoryStream);
+          // Load the memory stream into the picture
+          if assigned(MemoryStream) and (MemoryStream.Size > 0) then
+          begin
+            MemoryStream.Position := 0;
+            Result := GetBase64ImageFromStream(MemoryStream);
+          end
+          else
+            Axpro1.dbm.gf.DoDebug.Msg('MemoryStream not assigned.');
+        finally
+          MemoryStream.Free;
+        end;
+      end
+      else
+      begin
+        // Handle string field value
+        // Assign the string value to the PictureObject or perform any necessary processing
+        Axpro1.dbm.gf.DoDebug.Msg('Field value (string) : '+FieldValue);
+        if IsValidFilePath(FieldValue) then
+          Result := GetBase64ImageFromFile(FieldValue)
+        else
+          Axpro1.dbm.gf.DoDebug.Msg('frxReport1BeforePrint/' +
+            FieldValue + ' is not valid path.');
+      end;
+      //field suffiexed with _extension for extension , simlar way for height and width
+      if TfrxDBDataset(frxPrimaryDataSet).DataSet.FindField(FieldName+'_extension') <> nil then
+         sExtension :=  frxPrimaryDataSet.Value[FieldName+'_extension'];
+
+      if TfrxDBDataset(frxPrimaryDataSet).DataSet.FindField(FieldName+'_height') <> nil then
+         sHeight :=  frxPrimaryDataSet.Value[FieldName+'_height'];
+
+      if TfrxDBDataset(frxPrimaryDataSet).DataSet.FindField(FieldName+'_width') <> nil then
+         sWidth :=  frxPrimaryDataSet.Value[FieldName+'_width'];
+
+      //sExtension := GetFieldValueFromFrxDBDataset(TfrxDBDataset(frxPrimaryDataSet),FieldName+'_extension');
+      //sHeight := GetFieldValueFromFrxDBDataset(TfrxDBDataset(frxPrimaryDataSet),FieldName+'_height');
+      //sWidth := GetFieldValueFromFrxDBDataset(TfrxDBDataset(frxPrimaryDataSet),FieldName+'_width');
+    end
+    else
+    begin
+      // if the field is from Form
+      Axpro1.dbm.gf.DoDebug.Msg('Checking Form field ...');
+      if storedata.structdef.GetField(FieldName) <> nil then
+      begin
+        try
+          Axpro1.dbm.gf.DoDebug.Msg('Form field found');
+          sAxpImagePath := parser.GetVarValue('AxpImagePath');
+          // GetAxpImgPath;
+          if sAxpImagePath <> '' then
+            sAxpImagePath := IncludeTrailingBackslash(sAxpImagePath);
+          Axpro1.dbm.gf.DoDebug.Msg
+            ('SetFRObjectProps/ Values of AxpImagePath : ' +
+            sAxpImagePath);
+          Axpro1.dbm.gf.DoDebug.Msg
+            ('SetFRObjectProps/ Values of ImageFromDB : ' +
+            BoolToStr(Axpro1.dbm.gf.bImageFromDB));
+
+          if (Axpro1.dbm.gf.bImageFromDB) or (sAxpImagePath = '')
+          then // read from DB
+          begin
+            Axpro1.dbm.gf.DoDebug.Msg('Form field / data from DB');
+            // Read from Image Table
+            Axpro1.dbm.gf.DoDebug.Msg
+              ('SetFRObjectProps/ Loading image from Table ' +
+              {sFastPrint_TransId}storedata.TransType + FieldName + '. Recordid : ' +
+              sRecordId);
+            With Axpro1.dbm.GetXds(nil) do
+            begin
+              buffered := True;
+              CDS.CommandText := 'select img from ' + {sFastPrint_TransId}storedata.TransType
+                + FieldName + ' where recordid = ' + sRecordId;
+              open;
+              if CDS.RecordCount > 0 then
+              begin
+              MemoryStream := nil;
+              try
+                MemoryStream := TMemoryStream.create;
+                TBlobField(CDS.FieldByName('img')).SaveToStream(MemoryStream);
+                if assigned(MemoryStream) and (MemoryStream.Size > 0) then
+                  Result := GetBase64ImageFromStream(MemoryStream);
+              finally
+                MemoryStream.free;
+              end;
+              end;
+              Free;
+            end;
+          end
+          else // Read from Path
+          begin
+            Axpro1.dbm.gf.DoDebug.Msg(' Form field / data from path');
+            sImagePath := sAxpImagePath + {sFastPrint_TransId}storedata.TransType + '\' +
+              FieldName + '\';
+            Axpro1.dbm.gf.DoDebug.Msg
+              ('SetFRObjectProps/ Loading image from path : ' +
+              sImagePath + '. Recordid : ' + sRecordId);
+            sImageFile := GetFileUsingPattern
+              (sImagePath + sRecordId + '.*');
+            if sImageFile <> '' then
+              Result := GetBase64ImageFromFile(sImageFile);
+
+          end;
+        except
+          on e: Exception do
+            Axpro1.dbm.gf.DoDebug.Msg
+              ('SetFRObjectProps/ Error while loading image/ ' +
+              FieldName + ' : ' + e.Message);
+        end;
+      end
+      else // if global var
+      begin
+        begin
+          sImageFile := GetValue(FieldName);
+          Axpro1.dbm.gf.DoDebug.Msg
+            ('SetFRObjectProps/ Loading image from : ' + sImageFile);
+          if sImageFile <> '' then
+            Result := GetBase64ImageFromFile(sImageFile);
+
+        end;
+      end;
+            //field suffiexed with _extension for extension , simlar way for height and width
+      sExtension := GetValue(FieldName+'_extension');
+      sHeight := GetValue(FieldName+'_height');
+      sWidth := GetValue(FieldName+'_width');
+    end;
+  end
+  else
+    result := '';
+  if result <> '' then
+  begin
+    if sExtension = '' then
+      sExtension := '.jpg';
+    if (sHeight = '') or (sHeight = '0') then
+      sHeight := '100';
+    if (sWidth = '') or (sWidth = '0') then
+      sWidth := '100';
+    iHeight := StrtoInt(sHeight);
+    iWidth := StrtoInt(sWidth);
+    result := PrepareHtmlImgTag(result,sExtension,iHeight,iWidth);
+  end;
+
+finally
+
+end;
+end;
+
+//SetHTMLImgSrcForDynamicFields
+Procedure TAxFastRun.SetHTMLImgSrcForDynamicFields(pFrxHTMLView : TFrxHTMLView);
+var
+  sHTMLViewContent,pInputStr : String;
+  PName,pValue, S:String;
+
+  Regex: TRegEx;
+  Match: TMatch;
+  FieldName,ResultStr: string;
+begin
+  try
+    Axpro1.dbm.gf.DoDebug.Msg('SetHTMLImgSrcForDynamicFields starts... ');
+    try
+      //pFrxHTMLView
+      sHTMLViewContent := pFrxHTMLView.HtmlViewer.Text;
+
+      if (Trim(sHTMLViewContent) = '') or ((pos('{', sHTMLViewContent) = 0) and (pos('}', sHTMLViewContent) = 0)) then exit;
+      pInputStr := sHTMLViewContent;
+      axpro1.dbm.gf.DoDebug.msg(sHTMLViewContent);
+      ResultStr := sHTMLViewContent;
+      Regex := TRegEx.Create('{(.*?)}'); // Regular expression to match field names inside curly braces
+      Match := Regex.Match(pInputStr);
+
+      while Match.Success do
+      begin
+        FieldName := Match.Groups[1].Value;
+        Axpro1.dbm.gf.DoDebug.Msg('Field with caption : '+FieldName);
+        // Check if the field name is in the format: "Field Name [fieldname]"
+        if Pos('[', FieldName) > 0 then
+        begin
+          FieldName := Copy(FieldName, Pos('[', FieldName) + 1, Length(FieldName));
+          FieldName := Copy(FieldName, 1, Pos(']', FieldName) - 1);
+
+          pName := FieldName;
+          pValue := '';
+          Axpro1.dbm.gf.DoDebug.Msg('Field name : '+pName);
+          //field not prefixed with image if prefixed with image it will condiered as image field
+          if AnsiStartsText(cImageFieldPrefix, pName) then
+          begin
+            pValue := PrepareHTMLImgSrc(pName);
+            Axpro1.dbm.gf.DoDebug.Msg('Field value : '+pValue);
+            // Replace the field name with the corresponding value from the data source
+            //if pValue <> '' then
+              //ResultStr := StringReplace(ResultStr, Match.Value, pValue, []);
+          end;
+          //if dynamic field value not found then replace it with empty string
+          //since dynamic value comes inside {[]} ,[] used for expressions in FR
+          //so it will throw error.
+          ResultStr := StringReplace(ResultStr, Match.Value, pValue, []);
+        end;
+        Match := Match.NextMatch;
+      end;
+      axpro1.dbm.gf.DoDebug.msg('SetHTMLImgSrcForDynamicFields/ Result '+ResultStr);
+      if ResultStr <> '' then
+         pFrxHTMLView.HtmlViewer.Text := ResultStr;
+
+    except on e:exception do
+      Axpro1.dbm.gf.DoDebug.Msg('SetHTMLImgSrcForDynamicFields/Error : '+E.Message);
+    end;
+    Axpro1.dbm.gf.DoDebug.Msg('SetHTMLImgSrcForDynamicFields ends. ');
+  finally
+
+  end;
+end;
+
+// AssignPictureObjectEvent | Runtime
+procedure TAxFastRun.AssignPictureObjectEvent(ReportComponent: TfrxComponent);
+var
+  I: Integer;
+begin
+  TfrxReport(ReportComponent).OnBeforePrint :=  self.frxReport1BeforePrint;//frxReportOnReportPrint;
+  (*
+  // Check if the ReportComponent is of type TfrxPictureView
+  if ReportComponent is TfrxPictureView then
+  begin
+    // Cast the ReportComponent to TfrxPictureView and assign the OnBeforePrint event
+    TfrxPictureView(ReportComponent).OnBeforePrint := Picture1OnBeforePrint1;
+  end;
+
+  // Traverse the child components of the ReportComponent recursively
+  for I := 0 to ReportComponent.Objects.Count - 1 do
+    AssignPictureObjectEvent(ReportComponent.Objects[I]);
+  *)
+end;
+
+//SetFRObjectProps
+Procedure TAxFastRun.SetFRObjectProps(pXDS : TXDS{pTitle,pHeader,pBody,pSummary,pFooter : String});
+var
+  iIdx,jIdx : Integer;
+  sContent,sFrxQueryComponent : String;
+  sRecordId,sReportTitle,sPageHeader,sBody,sReportSummary,sPageFooter : String;
+  sPictureDataField,sDataField : String;
+  sAxpImagePath,sImagePath,sImageFile : String;
+
+  frxBand : TfrxBand;
+  frxHTMLView : TfrxHTMLView;
+  frxPictureView : TfrxPictureView;
+
+  frxDBXQuery : TfrxDBXQuery;
+  frxADOQuery : TfrxADOQuery;
+  frxDBComponent : TfrxComponent;
+  frxDataSet : TfrxDataSet;
+  frxView : TfrxView;
+  frxReportPage : TfrxReportPage;
+
+  stm : TStringStream;
+
+  bIsDBX : Boolean;
+const
+  sFastPrint_TransId = 'ad_fp'; //axfsc
+begin
+  try
+    frxBand := nil;
+    frxHTMLView := nil;
+    frxPictureView := nil;
+
+    frxDBXQuery := nil;
+    frxADOQuery := nil;
+    frxDBComponent := nil;
+    frxDataSet := nil;
+
+    bIsDBX := False;
+    try
+      Axpro1.dbm.gf.DoDebug.Msg('SetFRObjectProps starts... ');
+//      if Not Assigned(pXDS) or (pXDS.CDS.IsEmpty) then
+//        Exit;
+      stm := nil;
+      sRecordId := pXDS.CDS.FieldByName('ax_configure_fast_printsid').AsString;
+      if Axpro1.dbm.connection.dbtype = 'ms sql' then
+        bIsDBX := False
+      else //Other DB's postgres,mysql,oracle
+        bIsDBX := True;
+
+      //Find and Load DataSet
+      if Not bIsDBX then
+        sFrxQueryComponent := 'ADOQuery1'
+      else
+        sFrxQueryComponent := 'DBXQuery1';
+      frxDBComponent := frxReport.FindObject(sFrxQueryComponent);
+      if Assigned(frxDBComponent) then
+      begin
+        if Not bIsDBX then
+          frxDataSet := TfrxADOQuery(frxDBComponent)
+        else
+          frxDataSet := TfrxDBXQuery(frxDBComponent);
+      end;
+
+      //Assign dataset to MasterDataBand
+      for iIdx :=  0 to frxReport.ComponentCount-1 do
+      begin
+        //This can be handled in the below loope also , need to check
+        if frxReport.Components[iIdx].ClassType = TfrxMasterData then
+        begin
+          frxBand := TfrxMasterData(frxReport.Components[iIdx]);
+          TfrxMasterData(frxBand).DataSet := frxDataSet;
+          Break;
+        end;
+      end;
+
+        for jIdx := 0 to frxReport.ComponentCount - 1 do
+        begin
+          sDataField := '';
+          frxView := nil;
+          if frxReport.Components[jIdx].ClassType = TfrxHtmlView then //HTMLview
+          begin
+            frxHTMLView := TfrxHtmlView(frxReport.Components[jIdx]);
+            if frxHTMLView.Parent.ClassType = TfrxReportTitle then
+            begin
+              sDataField := 'report_title';
+              //SetFrxAppTitle(frxHTMLView,pXDS);
+            end
+            else if frxHTMLView.Parent.ClassType = TfrxPageHeader then
+              sDataField := 'page_header'
+            else if frxHTMLView.Parent.ClassType = TfrxMasterData then
+              sDataField := 'fr_body'
+            else if frxHTMLView.Parent.ClassType = TfrxReportSummary then
+              sDataField := 'report_summary'
+            else if frxHTMLView.Parent.ClassType = TfrxPageFooter then
+              sDataField := 'page_footer';
+
+            if sDataField <> '' then
+              sContent := pXDS.CDS.FieldByName(sDataField).AsString;
+            frxHTMLView.HtmlViewer.Text := FillDynamicParamWithQueryColumn(sContent,frxDBComponent);
+            if frxHTMLView.Parent.ClassType = TfrxReportTitle then
+              SetFrxAppTitle(frxHTMLView,pXDS);
+            frxView := frxHTMLView;
+          end
+          else if frxReport.Components[jIdx].ClassType = TfrxPictureView then //picture
+          begin
+            sPictureDataField := '';
+            frxPictureView := TfrxPictureView(frxReport.Components[jIdx]);
+            if frxPictureView.Parent.ClassType = TfrxReportTitle then
+            begin
+              if frxPictureView.Align = baLeft then
+                sPictureDataField := 'rt_image_left'
+              else if frxPictureView.Align = baRight then
+                sPictureDataField := 'rt_image_right';
+            end
+            else if frxPictureView.Parent.ClassType = TfrxPageHeader then
+            begin
+
+              if frxPictureView.Align = baLeft then
+                sPictureDataField := 'ph_image_left'
+              else if frxPictureView.Align = baRight then
+                sPictureDataField := 'ph_image_right';
+            end
+            else if frxPictureView.Parent.ClassType = TfrxReportSummary then
+            begin
+              if frxPictureView.Align = baLeft then
+                sPictureDataField := 'rs_image_left'
+              else if frxPictureView.Align = baRight then
+                sPictureDataField := 'rs_image_right';
+            end
+            else if frxPictureView.Parent.ClassType = TfrxPageFooter then
+            begin
+              if frxPictureView.Align = baLeft then
+                sPictureDataField := 'pf_image_left'
+              else if frxPictureView.Align = baRight then
+                sPictureDataField := 'pf_image_right';
+            end;
+            if sPictureDataField <> '' then
+            begin
+              try
+//                sAxpImagePath := Parser.GetVarValue('AxpImagePath');//GetAxpImgPath;
+//                if sAxpImagePath <> '' then
+//                  sAxpImagePath := IncludeTrailingBackslash(sAxpImagePath);
+//                Axpro1.dbm.gf.DoDebug.Msg('SetFRObjectProps/ Values of AxpImagePath : '+sAxpImagePath);
+//                Axpro1.dbm.gf.DoDebug.Msg('SetFRObjectProps/ Values of ImageFromDB : '+BoolToStr(Axpro1.dbm.gf.bImageFromDB));
+//                (*
+//                if sAxpImagePath = '' then
+//                  sAxpImagePath := Parser.GetVarValue('AxpImageServer');//GetAxpImgServer;
+//                *)
+//                if (Axpro1.dbm.gf.bImageFromDB) or (sAxpImagePath = '') then //read from DB
+//                begin
+//                  //Read from Image Table
+//                  Axpro1.dbm.gf.DoDebug.Msg('SetFRObjectProps/ Loading image from Table axfsc'+sPictureDataField+'. Recordid : '+sRecordId);
+//                  With Axpro1.dbm.GetXDS(nil) do
+//                  begin
+//                    buffered := true;
+//                    CDS.CommandText := 'select img from axfsc'+sPictureDataField+' where recordid = '+sRecordId;
+//                    open;
+//                    if CDS.RecordCount > 0 then
+//                    begin
+//                      stm := TStringStream.Create;
+//                      TBlobField(CDS.FieldByName('img')).SaveToStream(stm);
+//                      if Assigned(stm) and (stm.Size > 0) then
+//                        frxPictureView.LoadPictureFromStream(stm);
+//                    end
+//                    else
+//                      frxPictureView.Visible := False;
+//                    Free;
+//                  end;
+//                end
+//                else //Read from Path
+//                begin
+//                  sImagePath := sAxpImagePath+sFastPrint_TransId+'\'+sPictureDataField+'\';
+//                  Axpro1.dbm.gf.DoDebug.Msg('SetFRObjectProps/ Loading image from path : '+sImagePath+'. Recordid : '+sRecordId);
+//                  sImageFile := GetFileUsingPattern(sImagePath+sRecordId+'.*');
+//                  if sImageFile <> '' then
+//                    frxPictureView.Picture.LoadFromFile(sImageFile)
+//                  else
+//                    frxPictureView.Visible := False;
+//                end;
+                sDataField := pXDS.CDS.FieldByName(sPictureDataField).AsString;
+                frxPictureView.DataField := sDataField;
+                frxView := frxPictureView;
+              except on E:Exception do
+                Axpro1.dbm.gf.DoDebug.Msg('SetFRObjectProps/ Error while loading image/ '+sPictureDataField+' : '+E.Message);
+              end;
+            end;
+          end
+          else if frxReport.Components[jIdx].ClassType = TfrxBarCodeView then //barcode
+          begin
+           //Need to be handled
+          end
+          else if frxReport.Components[jIdx].ClassType = TfrxDigitalSignatureView then //digital signature
+          begin
+		   //Need to be handled
+          end
+          else if frxReport.Components[jIdx].ClassType = TfrxDetailData then //DetailData band
+          begin
+			//Need to be handled
+          end
+          else if frxReport.Components[jIdx].ClassType = TfrxReportPage then //Report page
+          begin
+            frxReportPage := TfrxReportPage(frxReport.Components[jIdx]);
+            setFrxPageProperties(pXDS,frxReportPage);
+          end;
+//          else if frxReport.Components[jIdx].ClassType = TfrxBarcode2Dview then //qrcode
+//          begin
+//
+//          end;
+          if (sDataField <> '') and (Assigned(frxView)) then
+          begin
+            SetFrxViewHeight(pXDS,sDataField,frxView);
+            if frxView is TfrxPictureView then //pictureview
+              SetFrxViewWidth(pXDS,sDataField,frxView);
+          end;
+        end;
+
+      Axpro1.dbm.gf.DoDebug.Msg('SetFRObjectProps ends. ');
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in SetFRObjectProps '+E.Message);
+    end;
+  finally
+    if Assigned(stm) then
+      FreeAndNil(stm);
+  end;
+end;
+
+//InsertAxpertReports
+procedure TAxfastRun.InsertAxpertReports(pTemplateCaption: string);
+var
+  x1: TXDS;
+begin
+  x1 := nil;
+  try
+    x1 := Axpro1.dbm.GetXDS(nil);
+    x1.buffered := True;
+    x1.CDS.CommandText := 'insert into axpertreports(caption) values(:caption)';
+    x1.CDS.Params.ParamValues['caption'] := pTemplateCaption;
+    x1.execsql;
+  finally
+    if assigned(x1) then
+      FreeAndNil(x1);
+  end;
+end;
+
+//AddReportToAxfast
+procedure TAxfastRun.AddReportToAxfast(pCaption, pTransid,
+  pOutputFormat: String;pEmbeddedFonts:String='');
+var
+  qxds: TXDS;
+  sfile,tfile,sFileName,temppath : String;
+begin
+  qxds := nil;
+  try
+    //InsertAxpertReports
+    InsertAxpertReports(pCaption);
+
+    fastpath := Axpro1.dbm.gf.StartPath + '\fastreports\' + Axpro1.dbm.Connection.Projectname + '\';
+      if not DirectoryExists(fastpath) then
+        ForceDirectories(fastpath);
+
+    temppath := Axpro1.dbm.gf.StartPath + '\temp\frxtemp\';
+    if not DirectoryExists(temppath) then
+      ForceDirectories(temppath);
+
+      sFileName := lowercase(fastpath + pCaption);
+    frxReport.SaveToFile(sFileName + '.fr3');
+
+    //WriteToAxpertReports
+    sfile := fastpath + pCaption + '.fr3';
+    tfile := temppath + pCaption + '.' + 'WTDB';
+    if FileExists(tfile) then
+      DeleteFile(tfile);
+    // Compress
+    With TCompress.Create do
+    begin
+      CompressFile(sfile, tfile);
+      Free;
+    end;
+    Axpro1.dbm.WriteBlob('design', 'axpertreports', ' caption = '+QuotedStr(pCaption), tfile, true );
+
+    //Deletereport if exists
+    //Axpro1.ExecuteSQL('delete from axfastlink where (caption)=('+quotedStr(pCaption)+')');
+    Axpro1.ExecSQL('delete from axfastlink where (caption)=('+quotedStr(pCaption)+')','','',false);
+
+    //AdRecTo AxFastLink
+    qxds := Axpro1.dbm.GetXDS(nil);
+    qxds.buffered := True;
+    qxds.close;
+    if pOutputFormat = '' then
+      pOutputFormat := 'pdf';
+    if pEmbeddedFonts = '' then
+      pEmbeddedFonts := 'F';
+    qxds.CDS.CommandText :=
+      'insert into axfastlink(caption,transid,output,efont) values(' +
+      quotedStr(pCaption) + ',' + quotedStr(pTransid) + ',' +
+      quotedStr(pOutputFormat) + ','+QuotedStr(pEmbeddedFonts)+')';
+    qxds.execsql;
+    qxds.close;
+  finally
+    if assigned(qxds) then
+      FreeAndNil(qxds);
+  end;
+end;
+
+//SetFRProps
+Procedure TAxFastRun.SetFRProps(pXDS : TXDS);
+var
+  sOutPutFormat : String;
+begin
+  try
+    Axpro1.dbm.gf.DoDebug.Msg('SetFRProps starts... ');
+
+    Axpro1.dbm.gf.DoDebug.Msg('SetFRProps ends. ');
+  finally
+
+  end;
+end;
+
+//AlignObjectsToTopWidth
+Procedure TAxFastRun.AlignObjectsToTopWidth(Report: TfrxReport);
+var
+  Page: TfrxReportPage;
+  i: Integer;
+begin
+  try
+    if Not Assigned(Report) then
+      Exit;
+    Page := nil;
+    // Find the desired page by its name or index
+    // Example 1: Find by name
+    Page := Report.FindObject('Page1') as TfrxReportPage;
+
+    if Page = nil then
+    // Example 2: Find by index
+      Page := Report.Pages[0] as TfrxReportPage;
+
+    if Page <> nil then
+    begin
+      // Align objects on the page
+      //for i := 0 to Page.Objects.Count - 1 do
+        //Page.Objects[i].Align := baWidth;  // Align objects to the width of the page
+
+      // Align objects on the page
+      //Page.AlignToGrid(0, 0, Page.Width, Page.Height, False);
+      //Do the stuff
+    end;
+  finally
+
+  end;
+end;
+
+
+//DesignFastReport
+//https://stackoverflow.com/questions/64072872/how-to-load-a-report-fastreports-totally-in-runtime
+//https://www.fast-report.com/documentation/DevMan/index.html?custom_db_engines_writing.htm
+Procedure TAxfastRun.DesignFastReport(pFormName,pSourceTemplateName,pTargetTemplateName : String);
+var
+  QXds : TXDS;
+  sMasterData_SQLText,sDetailData_SQLText : String;
+  sSourceReportName,sTargetReportName,sTransId : String;
+  sOutputFormat,sEmbeddedFonts : String;
+
+  stm_FR_template : TStringStream;
+begin
+  Axpro1.dbm.gf.DoDebug.Msg('DesignFastReport starts... ');
+  QXds := nil;
+  stm_FR_template := nil; //Stream object to hold FR Template
+  try
+    try
+      QXds := Axpro1.dbm.GetXDS(nil);
+      QXds.buffered := True;
+      QXds.CDS.CommandText := 'select * from ax_configure_fast_prints where lower(form_name)='+QuotedStr(pFormName)+' and '+
+                              ' lower(form_template)='+QuotedStr(pSourceTemplateName)+' and '+
+                              ' lower(template_name)='+QuotedStr(pTargetTemplateName);
+      QXds.open;
+      if QXds.cds.IsEmpty then
+      begin
+        Axpro1.dbm.gf.DoDebug.Msg('AxfastRun/ DesignFastReport / data not exists in ax_configure_fast_prints table.');
+        Exit;
+      end;
+
+      QXds.CDS.first;
+
+      sMasterData_SQLText := QXds.CDS.FieldByName('sql_text').AsString;
+
+      sTransId := QXds.CDS.FieldByName('form_name').AsString;
+      sSourceReportName := QXds.CDS.FieldByName('form_template').AsString;
+      sTargetReportName := QXds.CDS.FieldByName('template_name').AsString;
+      sEmbeddedFonts := 'T';//QXds.CDS.FieldByName('embeddedfonts').AsString;
+      try
+        sOutputFormat := QXds.CDS.FieldByName('report_outputformat').AsString;
+      except on E:Exception do
+        Axpro1.dbm.gf.DoDebug.Msg('DesignFastReport/ Error '+E.Message);
+      end;
+
+      stm_FR_template := TStringStream.Create('',TEncoding.UTF8); //StringStream object creation
+      frxReport.Clear;
+      ReadFastReport(sSourceReportName,stm_FR_template);
+      frxReport.LoadFromStream(stm_FR_template);
+      //SetFRProps(QXds);
+      BindMasterDataSource(sMasterData_SQLText);
+      try
+        BindDetailDataSource(QXds);
+      except on E:Exception do
+        Axpro1.dbm.gf.DoDebug.Msg('DesignFastReport/ Error in BindDetailDataSource'+E.Message);
+      end;
+      SetFRObjectProps(QXds);
+      //AddReportToAxfast tables
+      AddReportToAxfast(sTargetReportName,sTransId,sOutputFormat,sEmbeddedFonts);
+      Axpro1.dbm.gf.DoDebug.Msg('DesignFastReport ends. ');
+    Except on E:Exception do
+      Axpro1.dbm.gf.DoDebug.Msg('Error in DesignFastReport '+E.Message);
+    end;
+  finally
+    if Assigned(stm_FR_template) then
+      FreeAndNil(stm_FR_template);
+    if Assigned(QXds) then
+      FreeAndNil(QXds);
+  end;
+end;
+
+//EvalFRContent
+Function TAxFastRun.EvalFRContent(pFRContent : String):String;
+var
+  iPOSofFRCondStart,iPOSofFRCondEnd : Integer;
+  sFRContentInLower,sFRConditionalStr,sResultOfEval : String;
+  IsAxFRConditionFound : Boolean;
+Const
+  cFRCondStart = '{axfrconditionstart}';
+  cFRCondEnd = '{axfrconditionend}';
+
+  function TrimFRExpression(pFRExpression : string): string;
+  Begin  //<br /> tags adding from web richedit - To remove that we have introduced this function.
+    if (pos('<br />', pFRExpression) > 0) then
+      pFRExpression := ReplaceStr(pFRExpression,'<br />','');
+    if (pos('<br/>', pFRExpression) > 0) then
+      pFRExpression := ReplaceStr(pFRExpression,'<br/>','');
+    result := Trim(pFRExpression);
+  end;
+
+begin
+  Axpro1.dbm.gf.DoDebug.Msg('EvalFRContent starts...');
+  try
+    result := pFRContent;
+    Axpro1.dbm.gf.DoDebug.Msg('Actual content : '+pFRContent);
+    iPOSofFRCondStart := 0;
+    iPOSofFRCondEnd := 0;
+    //Converted to lower to find FR conditions | Actual content will not modified
+    sFRContentInLower := LowerCase(pFRContent);
+    IsAxFRConditionFound := False;
+
+    iPOSofFRCondStart := POS(cFRCondStart,sFRContentInLower);
+    if iPOSofFRCondStart = 0 then
+      Exit;
+
+    iPOSofFRCondEnd := POS(cFRCondEnd,sFRContentInLower);
+    if iPOSofFRCondEnd = 0 then
+    begin
+      Axpro1.dbm.gf.DoDebug.Msg('EvalFRContent/ Invalid conditional statement found.');
+      Exit;
+    end;
+
+    sFRConditionalStr := Trim(Copy(pFRContent, iPOSofFRCondStart + length(cFRCondStart){+1}, iPOSofFRCondEnd {- 1} - (iPOSofFRCondStart + length(cFRCondStart)){iPOSofFRCondStart - length(cFRCondEnd)}));
+    Axpro1.dbm.gf.DoDebug.Msg('Conditional string : '+sFRConditionalStr);
+    if sFRConditionalStr <> '' then
+      IsAxFRConditionFound := True;
+    while IsAxFRConditionFound do
+    begin
+      Axpro1.dbm.gf.DoDebug.Msg('Evaluating Conditional string : '+sFRConditionalStr);
+      sFRConditionalStr := TrimFRExpression(sFRConditionalStr);
+      Axpro1.dbm.gf.DoDebug.Msg('Evaluating Conditional string After Trim : '+sFRConditionalStr);
+      parser.Evaluate(sFRConditionalStr);
+      sResultOfEval := parser.Value;
+      Axpro1.dbm.gf.DoDebug.Msg('Eval result : '+sResultOfEval);
+
+      //Delete(sFRContentInLower,iPOSofFRCondStart,iPOSofFRCondEnd+Length(cFRCondEnd));//Delete conditional part from sFRContentInLower
+      Delete(sFRContentInLower,iPOSofFRCondStart,iPOSofFRCondEnd + Length(cFRCondEnd) - iPOSofFRCondStart);//Delete conditional part from sFRContentInLower
+
+      Insert(sResultOfEval,sFRContentInLower,iPOSofFRCondStart); //Insert evaluated conditions result
+
+      //Delete(pFRContent,iPOSofFRCondStart,iPOSofFRCondEnd+Length(cFRCondEnd));//Delete conditional part from pFRContent
+      Delete(pFRContent,iPOSofFRCondStart,iPOSofFRCondEnd + Length(cFRCondEnd) - iPOSofFRCondStart);//Delete conditional part from sFRContentInLower
+
+      Insert(sResultOfEval,pFRContent,iPOSofFRCondStart); //Insert evaluated conditions result
+
+      iPOSofFRCondStart := POS(cFRCondStart,sFRContentInLower);
+      if iPOSofFRCondStart = 0 then
+        Break;
+
+      iPOSofFRCondEnd := POS(cFRCondEnd,sFRContentInLower);
+      if iPOSofFRCondEnd = 0 then
+      begin
+        Axpro1.dbm.gf.DoDebug.Msg('EvalFRContent/ Invalid conditional statement found.');
+        Break;
+      end;
+
+      //sFRConditionalStr := Trim(Copy(pFRContent, iPOSofFRCondStart + length(cFRCondStart)+1, iPOSofFRCondEnd - 1{iPOSofFRCondStart - length(cFRCondEnd)}));
+      sFRConditionalStr := Trim(Copy(pFRContent, iPOSofFRCondStart + length(cFRCondStart){+1}, iPOSofFRCondEnd {- 1} - (iPOSofFRCondStart + length(cFRCondStart)){iPOSofFRCondStart - length(cFRCondEnd)}));
+      Axpro1.dbm.gf.DoDebug.Msg('Conditional string : '+sFRConditionalStr);
+      if sFRConditionalStr <> '' then
+        IsAxFRConditionFound := True;
+    end;
+    //FillDynamic Params can be called here it is required , but the same cna be handled through TStruct vars | FR DB vars (in the content)
+    result := pFRContent;
+    Axpro1.dbm.gf.DoDebug.Msg('EvalFRContent : Evaluated content : '+result);
+  finally
+
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('EvalFRContent ends.');
+end;
+
+//PrepareDynamicContent
+(*
+This looks for Axpert conditional statements in the content and evalute it, Based on the result it prepares the display content.
+*)
+Procedure TAxFastRun.PrepareDynamicContent;
+var
+  iIdx : Integer;
+  sActualFRContent,sEvaluatedFRContent : String;
+
+  frxMemo : TfrxMemoView;
+  rtf_text : TfrxRichView;
+  HTMLView : TfrxHTMLView;
+begin
+  Axpro1.dbm.gf.DoDebug.Msg('PrepareDynamicContent starts...');
+  try
+    sActualFRContent := '';
+    sEvaluatedFRContent := '';
+    try
+      //Condition should be in below format
+     (*
+     Content Line 1...
+     Content Line 2...
+     {axfrconditionstart}
+     iif(displaycontenttype={block1},DynamicContent_block_1,DynamicContent_block_2)
+     {axfrconditionend}
+     Content Line 3...
+     {axfrconditionstart}
+     iif(displaycontenttype={block4},DynamicContent_block_3,DynamicContent_block_4)
+     {axfrconditionend}
+     Content Line 4...
+     )
+     *)
+      for iIdx :=  0 to frxReport.ComponentCount-1 do
+      begin
+        if frxReport.Components[iIdx].ClassType = TfrxMemoView then
+        begin
+           frxMemo := TfrxMemoView(frxReport.Components[iIdx]);
+           sActualFRContent := frxMemo.Memo.Text;
+           sEvaluatedFRContent := EvalFRContent(sActualFRContent);
+           frxMemo.Memo.Text := sEvaluatedFRContent;
+        end else if frxReport.Components[iIdx].ClassType = TfrxRichView then
+        begin
+           rtf_text := TfrxRichView(frxReport.Components[iIdx]);
+           sActualFRContent := rtf_text.RichEdit.Lines.Text;
+           sEvaluatedFRContent := EvalFRContent(sActualFRContent);
+           rtf_text.RichEdit.Lines.Text := sEvaluatedFRContent;
+        end
+        else if frxReport.Components[iIdx].ClassType = TfrxHTMLView then begin
+           HTMLView := TfrxHTMLView(frxReport.Components[iIdx]);
+           sActualFRContent := HTMLView.HtmlViewer.Text;
+           sEvaluatedFRContent := EvalFRContent(sActualFRContent);
+           HTMLView.HtmlViewer.Text := sEvaluatedFRContent;
+        end;
+      end;
+    Except on E:Exception do
+    begin
+      Axpro1.dbm.gf.DoDebug.Log('Error in PrepareDynamicContent : '+E.Message);
+      Axpro1.dbm.gf.DoDebug.Msg('Error in PrepareDynamicContent : '+E.Message);
+    end;
+    end;
+  finally
+
+  end;
+  Axpro1.dbm.gf.DoDebug.Msg('PrepareDynamicContent ends.');
+end;
+
+
+
+(*
+FastReport designer properties to be noted:
+
+TfrxHTMLView -
+
+ Align - baWidth
+ StretchMode - smActualHeight (if required)
+
+All bands stretch property set to true except Header and DetailsDataBand.
+
+Data contains [] are considered as FRX expressions . so its not working ;properly.
+
+Option to be introduced :
+
+v2:
+Cell formattings
+Details Data formattings - Formattings (just like details data header string)
+                           Left Top start point
+QrCode | Barcode | Digital signatures
+
+
+*)
+
+//FastPrint | Dynamic Template creation ends here
+
+end.
+

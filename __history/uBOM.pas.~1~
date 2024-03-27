@@ -1,0 +1,1008 @@
+unit uBOM;
+{Copied from 8906/sipf}
+interface
+uses
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
+  ComCtrls, math, db, grids, uGeneralFunctions, uDBManager, uXDS,XMLDoc, XMLIntf,uAXprovider;
+
+type
+  TOnReplaceTempTable = function(s:String):String of object;
+
+  TBOM = class
+  private
+    work : TXDS;
+    ords,parents,rords : TStringList;
+    QList : TList;
+
+    procedure ApplyBOMChange(BOMId, ItemId: String; InsCount: integer);
+    procedure ReviseBOM(ItemId,xmlstr: String);
+    function CreateBOM(ItemId,xmlstr: String): String;
+    procedure PrepareOneBOM(TableName, Itemid: String; EffectiveDate: TDateTime);
+    function rcount(qry: TXDS): integer;
+    function SerializeOrderno(childid: String; orderno: Integer): Integer;
+  public
+    dbm : TDBManager;
+    tv : TTreeView;
+    OnReplaceTempTable : TOnReplaceTempTable;
+    axp : TAXProvider;
+    constructor create; virtual;
+    destructor destroy; override;
+    procedure ExplodeBOM();
+    procedure PrepareBOM(TableName, Itemid: String; EffectiveDate: TDateTime);
+  end;
+
+implementation
+
+function TBOM.rcount(qry:TXDS):integer;
+var bk:TBookMark;
+begin
+  Result := 0;
+  bk := qry.CDS.GetBookmark;
+  qry.CDS.First;
+  while not qry.CDS.Eof do begin
+    Result := Result + 1;
+    qry.CDS.Next;
+  end;
+  qry.CDS.GotoBookmark(bk);
+  qry.CDS.FreeBookmark(bk);
+end;
+
+function TBOM.CreateBOM(ItemId,xmlstr:String): String;
+var idx, ono, icount,i, ROrderNo, odx, k, x :integer;
+    Q,QY : TXDS;
+    parent, bomid, SQL : String;
+    Fault : boolean;
+    Xmldoc : IXMLDocument;
+    XmlParentNode,XmlNode,cnode : IXMLNode;
+begin
+  try
+  Result := 'f';
+  bomid := itemid;
+  parent := itemid;
+  ords.clear;
+  ords.add('0');
+  ords.add('0');
+  idx := 0;
+  odx := 0;
+  Fault := false;
+  icount := 0;
+  Xmldoc := LoadXMLData(xmlstr);
+  XmlNode := XmlDoc.DocumentElement.ChildNodes.FindNode('xbom');
+  if XMLNode = Nil then begin
+    ShowMessage('Unable to find the xbom node in XML');
+    exit;
+  end;
+  cnode := XMlNode.ChildNodes.FindNode('createbom');
+  if cnode = nil then begin
+    ShowMessage('Unable to find the createbom node in xbom Node');
+    exit;
+  end;
+  SQL := cnode.NodeValue;
+  dbm.gf.dodebug.Msg('id - '+itemid);
+  work := Txds.create('Work',Nil,dbm.Connection,dbm.gf);  //('CB__Work', databasename, dm);
+  Work.buffered := True;
+  work.CDS.CommandText  := 'delete from bomtree where bomid=:id';
+  work.CDS.Params.ParamByName('id').asstring := itemid;
+  work.CDS.Execute;
+  dbm.gf.dodebug.Msg('prmparentid - '+parent);
+  dbm.gf.dodebug.Msg('prmorderno - '+inttostr(icount));
+  dbm.gf.dodebug.Msg('prmbomid - '+itemid);
+  dbm.gf.dodebug.Msg('prmlevelno - '+inttostr(idx+1));
+
+  Q := TXds.create('Q',Nil,dbm.Connection,dbm.gf);
+  Q.buffered := true;
+  Q.CDS.CommandText   := SQL;
+  q.CDS.Params.ParamByName('prmparentid').AsString := parent;
+  q.CDS.Params.ParamByName('prmorderno').AsString := inttostr(icount);
+  q.CDS.Params.ParamByName('prmbomid').AsString := itemid;
+  q.CDS.Params.ParamByName('prmlevelno').AsString := inttostr(idx+1);
+  Q.CDS.open;
+  ROrderNo := Q.CDS.Fieldbyname('rorderno').asinteger;
+  QList.clear;
+  QList.add(Q);
+  ONo := 0;
+  Parents.clear;
+  Parents.add(parent);
+  While true do begin
+    if Q.cds.ISEmpty then begin
+      //Q.close;
+      while QList.count > 0 do begin
+        QList.delete(Qlist.count-1);
+        Parents.delete(parents.count-1);
+        idx := Qlist.count-1;
+        if idx < 0 then break;
+        q := TXDS(Qlist[idx]);
+        q.cds.next;
+        if (not q.cds.eof) then begin
+          inc(ono);
+          inc(odx);
+          if (q.cds.FieldByName('HasBOM').asboolean) then begin
+            if idx = 0 then ROrderNo := Q.cds.fieldbyname('rorderno').asinteger;
+            parent := Q.cdS.fieldbyname('Childid').asstring;
+            break;
+          end;
+        end;
+      end;
+      if qlist.count=0 then break;
+    end else begin
+      dbm.gf.dodebug.Msg('prmparentid - '+parent);
+      dbm.gf.dodebug.Msg('prmorderno - '+inttostr(icount));
+      dbm.gf.dodebug.Msg('prmbomid - '+itemid);
+      dbm.gf.dodebug.Msg('prmlevelno - '+inttostr(idx+1));
+
+      work.CDS.CommandText  := 'Insert into bomtree '+SQL;
+      work.CDS.Params.ParamByName('prmparentid').asstring := parent;
+      work.CDS.Params.ParamByName('prmorderno').asString := inttostr(icount);
+      work.CDS.Params.ParamByName('prmbomid').asstring := itemid;
+      work.CDS.Params.ParamByName('PrmLevelno').asString := inttostr(idx+1);
+      work.CDS.Execute;
+      icount := icount+ RCount(Q);
+      inc(odx);
+      k := odx;
+      while not q.cds.eof do begin
+        ords.Insert(k, q.CDS.fieldbyname('orderno').asstring);
+        inc(k);
+        q.cds.next;
+      end;
+      q.cds.first;
+      parent := Q.CDS.fieldbyname('childid').asstring;
+      if idx = 0 then ROrderNo := Q.CDS.fieldbyname('rorderno').asinteger;
+      inc(ono);
+    end;
+    idx := QList.count-1;
+    dbm.gf.dodebug.Msg('prmparentid - '+parent);
+    dbm.gf.dodebug.Msg('prmorderno - '+inttostr(icount));
+    dbm.gf.dodebug.Msg('prmbomid - '+itemid);
+    dbm.gf.dodebug.Msg('prmlevelno - '+inttostr(idx+1));
+    Q := TXds.create('Q',Nil,dbm.Connection,dbm.gf);
+    Q.buffered := true;
+    Q.CDS.CommandText   := SQL;
+    q.CDS.Params.ParamByName('prmparentid').AsString := parent;
+    q.CDS.Params.ParamByName('prmorderno').AsString  := inttostr(icount);
+    q.CDS.Params.ParamByName('prmbomid').AsString := itemid;
+    q.CDS.Params.ParamByName('prmlevelno').AsString  := inttostr(idx+1);
+    Q.CDS.open;
+    QList.Add(Q);
+    idx := QList.count-1;
+    if parents.indexof(parent) > -1 then begin
+      Fault := true;
+      ShowMessage('Cyclic reference encountered in BOMTree. Parent Id '+Parent);
+      for i:=0 to Qlist.count-1 do
+        TXDS(QList[i]).Close;
+      break;
+    end;
+    parents.add(parent);
+  end;
+  if not fault then begin
+    for i:=1 to ords.count-2 do begin
+      dbm.gf.dodebug.Msg('newno - '+inttostr(0-i));
+      dbm.gf.dodebug.Msg('oldno - '+ords[i]);
+      dbm.gf.dodebug.Msg('bomid - '+itemid);
+      work.CDS.CommandText  := 'update bomtree set orderno = :newno where orderno = :oldno and bomid=:bomid';
+      work.CDS.Params.ParamByName('newno').asString := inttostr(0-i);
+      work.CDS.Params.ParamByName('oldno').asstring := ords[i];
+      work.CDS.Params.ParamByName('bomid').asstring := itemid;
+      work.CDS.Execute;
+    end;
+    work.CDS.CommandText  := 'update bomtree set orderno = abs(orderno) where orderno < 0';
+    work.CDS.Execute;
+  end;
+  finally
+   for i:=0 to Qlist.count-1 do
+     TXDS(QList[i]).Close;
+   QList.clear;
+   ords.clear;
+   parents.clear;
+  end;
+end;
+
+
+Procedure TBOM.ReviseBOM(ItemId,xmlstr:String);
+var Q1, Q2, Q3:TXDS;
+    RevSQL : String;
+    cins, icount, eord, k, ipos, spos, oshift, i, cnt, tcnt, sord, rcnt :integer;
+    RXMLDoc : IXMLDocument;
+    RXMLNode,cnode : IXMLNode;
+begin
+  Q1 := TXds.create('Q1',Nil,dbm.Connection,dbm.gf);
+  Q1.buffered := true;
+  Q2 := TXds.create('Q2',Nil,dbm.Connection,dbm.gf);
+  Q2.buffered := true;
+  Q3 := TXds.create('Q3',Nil,dbm.Connection,dbm.gf);
+  Q3.buffered := true;
+  RXMLDoc := LoadXMLData(xmlstr);
+  RXMLNode := RXMLDoc.DocumentElement.ChildNodes.FindNode('xbom') ;
+  if RXMLNode = Nil then begin
+    ShowMessage('xbom tag is not found in xml doc');
+    exit;
+  end;
+  icount := 0;
+  cins := 0;
+  spos := -1;
+
+  //Read revision sql from inputsql for new
+{  Q1.SQL.Text := 'Select * from inputsql where Transid = ''xbom'' and FieldName =''revisenew''';
+  Q1.open;
+  RevSQL := Q1.fieldbyname('SQLText').asstring;
+  Q1.Close;
+
+  Q1.SQL.Clear;
+  Q1.SQL.Text := RevSQL;
+  Q1.ParamByName('parentid').asstring := itemid;
+  Q1.ParamByName('prmorderno').asinteger := 1;
+  Q1.Open;
+  if not Q1.isempty then begin
+
+    while not Q1.eof do begin
+      Q2.SQL.Clear;
+      Q2.SQL.Text := 'update bomtree set rorderno=rorderno+1 where rorderno>=:ono and bomid=:id and levelno=1';
+      Q2.Params[0].AsInteger := Q1.Fieldbyname('ROrderNo').asinteger;
+      Q2.Params[1].AsString := Itemid;
+      Q2.ExecSQL;
+      Q1.Next;
+    end;
+    Q1.Close;
+
+    //Read bom of item into list
+    Q1.SQL.Clear;
+    Q1.SQL.Text := 'select * from bomtree where bomid=:id order by orderno';
+    Q1.Params[0].AsString := itemid;
+    Q1.Open;
+    ords.clear;
+    rords.clear;
+    while not Q1.eof do begin
+      ords.Add(Q1.Fieldbyname('orderno').asstring);
+      if Q1.fieldbyname('levelno').asinteger = 1 then
+         rords.add(Q1.Fieldbyname('orderno').asstring);
+      Q1.Next;
+    end;
+    Q1.close;
+
+    Q2.SQL.Clear;
+    Q2.SQL.Text := 'delete from bomtemp';
+    Q2.ExecSQL;
+
+    Q2.SQL.Clear;
+    Q2.SQL.Text := 'Insert into bomtemp ' + RevSQL;
+    Q2.ParamByName('parentid').asstring := itemid;
+    Q2.ParamByName('prmorderno').asinteger := ords.count+1;
+    Q2.ExecSQL;
+
+    Q1.SQL.Clear;
+    Q1.SQL.Text := 'select * from bomtemp order by orderno';
+    Q1.Open;
+    if not Q1.IsEmpty then begin
+      Q1.Last;
+      icount := ords.count+1+Q1.fieldbyname('orderno').asinteger+1;
+      Q1.first;
+      cins := RCount(Q1);
+    end;
+
+    Q3.SQL.clear;
+    Q3.SQL.Text := 'Select * from bomtemp where bomid = :id order by orderno';
+
+    oshift := 0;
+    While not Q1.eof do begin
+      Q2.SQL.Clear;
+      Q2.SQL.Text := 'insert into bomtemp select * from bomtree where bomid = :id';
+      Q2.Params[0].asstring := Q1.fieldbyname('childid').asstring;
+      Q2.ExecSQL;
+
+      Q2.SQL.Clear;
+      Q2.SQL.Text := 'update bomtemp set orderno=orderno+:icount, levelno=levelno+1, effectivedate=:edate where bomid = :id';
+      Q2.Params[0].asinteger := icount;
+      Q2.params[1].asdatetime := Q1.fieldbyname('effectivedate').asdatetime;
+      Q2.Params[2].asstring := Q1.fieldbyname('childid').asstring;
+      Q2.ExecSQL;
+
+      k := Q1.fieldbyname('rorderno').asinteger-1;
+      Q3.params[0].asstring := Q1.fieldbyname('childid').asstring;
+      Q3.open;
+      cins := cins + RCount(Q3);
+      if k < rords.count then begin
+        ipos := strtoint(rords[k])-1+oshift;
+        if (spos=-1) or (ipos<spos) then spos := ipos;
+        ords.insert(ipos, Q1.fieldbyname('orderno').AsString);
+        rords.insert(k, Q1.fieldbyname('orderno').asstring);
+        inc(ipos);
+        inc(icount);
+        inc(oshift);
+        while not Q3.eof do begin
+          ords.insert(ipos, Q3.fieldbyname('orderno').asstring);
+          inc(ipos);
+          inc(icount);
+          inc(oshift);
+          Q3.next;
+        end;
+      end else begin
+        if (spos=-1) or (ipos<spos) then spos := ords.count;
+        ords.add(Q1.fieldbyname('orderno').asstring);
+        rords.add(Q1.fieldbyname('orderno').asstring);
+        inc(icount);
+        inc(oshift);
+        while not Q3.eof do begin
+          ords.add(Q3.fieldbyname('orderno').asstring);
+          inc(icount);
+          inc(oshift);
+          Q3.next;
+        end;
+      end;
+      Q3.Close;
+
+      inc(icount);
+      Q1.next;
+    end;
+    Q1.Close;
+
+    if spos >= 0 then begin
+      Q2.SQL.Clear;
+      Q2.SQL.Text := 'update bomtemp set bomid = :id';
+      Q2.Params[0].AsString := itemid;
+      Q2.ExecSql;
+
+      Q2.SQL.Clear;
+      Q2.SQL.Text := 'insert into bomtree select * from bomtemp';
+      Q2.ExecSql;
+
+      Q2.SQL.Clear;
+      Q2.SQL.Text := 'update bomtree set orderno = :newno where orderno=:oldno and bomid = :id';
+      for k:=spos to ords.count-1 do begin
+        Q2.params[0].asinteger := 0-(k+1);
+        Q2.params[1].asstring := ords[k];
+        Q2.Params[2].asstring := itemid;
+        Q2.execsql;
+      end;
+      Q2.sql.clear;
+      Q2.sql.text := 'update bomtree set orderno = abs(orderno) where orderno < 0';
+      Q2.execsql;
+    end;
+
+    Q2.SQL.Clear;
+    Q2.Sql.text := 'delete from bomtemp';
+    Q2.ExecSQL;
+  end else Q1.Close;}
+
+
+  //Read revision sql from XML Doc
+  cnode := RXMLNode.ChildNodes.FindNode('revisemod');
+  if cnode = Nil then begin
+     showmessage('<revisemod> tag is not found in <xbom> node');
+     exit;
+  end;
+  RevSQL := cnode.NodeValue;
+  Q2.CDS.CommandText  := 'Insert into bomtree ' + RevSQL;
+  Q2.CDS.Params.ParamByName('parentid').asstring := itemid;
+  Q2.CDS.Execute;
+
+  if spos > -1 then begin
+    //Sets the orderno properly for the inserted records
+    Q1.CDS.CommandText  := 'Select * from bomtree where orderno<0 and bomid=:id';
+    Q1.CDS.Params.ParamByName('id').AsString := itemid;
+    Q1.CDS.open;
+    Q2.CDS.CommandText  := 'update bomtree set orderno=:newno where orderno=:oldno and bomid=:itemid';
+    While not Q1.CDS.eof do begin
+      k := Q1.CDS.fieldbyname('orderno').asinteger;
+      ipos := ords.IndexOf(inttostr(abs(k)));
+      Q2.CDS.Params.ParamByName('newno').asString := inttostr(ipos+1);
+      Q2.CDS.Params.ParamByName('oldno').asString := inttostr(k);
+      Q2.CDS.Params.ParamByName('itemid').asstring := itemid;
+      Q2.CDS.Execute;
+      Q1.CDS.next;
+    end;
+    Q1.CDs.close;
+  end else begin
+    Q2.CDS.CommandText  := 'update bomtree set orderno=abs(orderno) where orderno<0 and bomid=:itemid';
+    Q2.CDS.Params.ParamByName('itemid').asstring := itemid;
+    Q2.CDS.Execute;
+  end;
+
+  //Deepak - Call For New.
+  //Read revision sql from XML Doc for modification
+  cnode := RXMLNode.ChildNodes.FindNode('revisecount');
+  if cnode = Nil then begin
+    showmessage('<revisecount> tag is not found in <xbom> tag');
+    exit;
+  end;
+  RevSQL := cnode.NodeValue;
+  Q1 := Txds.create('Q1',nil,dbm.Connection,dbm.gf);
+  Q1.buffered := true;
+  Q1.CDS.CommandText  := RevSQL;
+  Q1.CDS.Params.ParamByName('parentid').asstring := itemid;
+  Q1.CDS.Open;
+  rcnt := Q1.CDS.RecordCount;
+  Q1.CDS.Close;
+  cnode := RXMLNode.ChildNodes.FindNode('revisenew');
+  if cnode = Nil then begin
+    showmessage('<revisenew> tag is not found in <xbom> tag');
+    exit;
+  end;
+  RevSQL := cnode.NodeValue;
+  i := 1;
+  cnt := 0;
+  tcnt := 0;
+  for i := 1 to rcnt do begin
+    Q2.CDS.CommandText  := 'delete from bomtemp';
+    Q2.CDS.Execute;
+    Q2.CDS.CommandText  := 'insert into bomtemp ' + RevSQL;
+    Q2.CDS.Params.ParamByName('parentid').asstring := itemid;
+    Q2.CDS.Params.ParamByName('rno').AsString := inttostr(i);
+    Q2.CDS.Execute;
+    Q1.SQL.Text := 'select * from bomtemp';
+    Q1 := TXds.create('Q1',Nil,dbm.Connection,dbm.gf);
+    Q1.buffered := True;
+    Q1.CDS.Open;
+    sord := tcnt + Q1.CDS.FieldByName('orderno').AsInteger;
+
+    if Q1.CDS.IsEmpty <> true then begin
+      Q2.CDS.CommandText  := 'update bomtemp set orderno = orderno + :uorderno';
+      Q2.CDS.Params.ParamByName('uorderno').AsInteger := tcnt;
+      Q2.CDS.Execute;
+      Q2.CDS.CommandText  := 'insert into bomtemp select * from bomtree where bomid = :prmbomid';
+      Q2.CDS.Params.ParamByName('prmbomid').AsString := Q1.CDS.Fieldbyname('childid').AsString;
+      Q2.CDS.Execute;
+      cnt := SerializeOrderNo(Q1.CDS.Fieldbyname('childid').AsString, sord);
+
+{//Temp for PrepareOneBOM
+      Q2.SQL.Clear;
+      Q2.SQL.Text := 'update bomtemp set effectivedate = :prmdate where bomid = :childid';
+      Q2.ParamByName('prmdate').AsDateTime := Q1.Fieldbyname('effectivedate').AsDateTime;
+      Q2.ParamByName('childid').AsString := Q1.Fieldbyname('childid').AsString;
+      Q2.ExecSQL;
+//end}
+      Q2.CDS.CommandText  := 'update bomtemp set levelno = levelno+1 where bomid = :childid';
+      Q2.CDS.Params.ParamByName('childid').AsString := Q1.CDS.Fieldbyname('childid').AsString;
+      Q2.CDS.Execute;
+      Q2.CDS.CommandText  := 'update bomtemp set bomid = :bomid where bomid = :childid';
+      Q2.CDS.Params.ParamByName('bomid').AsString := itemid;
+      Q2.CDS.Params.ParamByName('childid').AsString := Q1.CDS.Fieldbyname('childid').AsString;
+      Q2.CDS.Execute;
+
+      Q2.CDS.CommandText  := 'update bomtree set orderno = orderno + :uorderno where bomid = :bomid and orderno >= :porderno';
+      Q2.CDS.Params.ParamByName('uorderno').AsString := inttostr(cnt);
+      Q2.CDS.Params.ParamByName('bomid').AsString := itemid;
+      Q2.CDS.Params.ParamByName('porderno').AsString := inttostr(sord);
+      Q2.CDS.Execute;
+
+      Q2.CDS.CommandText  := 'insert into bomtree select * from bomtemp';
+      Q2.CDS.Execute;
+
+      tcnt := tcnt + cnt;
+    end;
+    Q1.Close;
+  end;
+
+
+{  Q1.SQL.Clear;
+  Q1.SQL.Text := RevSQL;
+  Q1.ParamByName('parentid').asstring := itemid;
+  Q1.Open;
+
+  //This loop will add a d record for every deleted record & its children
+  While not Q1.eof do begin
+    if Q1.fieldbyname('rstatus').asstring = 'd' then begin
+      k := Q1.fieldbyname('orderno').asinteger;
+      ipos := ords.IndexOf(inttostr(abs(k)));
+      if ipos = -1 then ipos := abs(k) else ipos:=ipos+1;
+      Q2.SQL.Clear;
+      Q2.Sql.text := 'Select Min(OrderNo) As EOrd from BOMTree where BOMId = :BomId and OrderNo > :StartOrder and LevelNo <= :LevelNo';
+      Q2.params[0].asstring := itemid;
+      Q2.params[1].asinteger := ipos;
+      Q2.params[2].asinteger := Q1.fieldbyname('levelno').asinteger;
+      Q2.open;
+      EOrd := Q2.Fields[0].asinteger-1;
+      if eord = -1 then Eord := 32000;
+
+      //k := Q1.fieldbyname('orderno').asinteger;
+      //ipos := ords.IndexOf(inttostr(abs(k)));
+      //if ipos = -1 then ipos := abs(k);// else ipos:=ipos+1;
+
+      Q2.SQL.Clear;
+      Q2.Sql.text := 'insert into bomtemp select * from bomtree where BomId = :childid and orderno > :Sorder and orderno <=:Eorder';
+      Q2.params[0].asstring := itemid;
+      Q2.params[1].asinteger := ipos;
+      Q2.params[2].asinteger := eord;
+      Q2.ExecSQL;
+
+      Q2.SQL.Clear;
+      Q2.Sql.text := 'update bomtemp set rstatus = ''d'', effectivedate=:e';
+      Q2.Params[0].asdatetime := Q1.Fieldbyname('effectivedate').asdatetime;
+      Q2.execsql;
+
+      Q2.SQL.Clear;
+      Q2.Sql.text := 'insert into bomtree select * from bomtemp';
+      Q2.ExecSQL;
+
+      Q2.SQL.Clear;
+      Q2.Sql.text := 'delete from bomtemp';
+      Q2.ExecSQL;
+    end;
+    Q1.next;
+  end;
+  Q1.Close;}
+  //Revision modification ends here.
+
+
+  //Applying revision to parents
+  Q1 := TXds.create('Q1',Nil,dbm.Connection,dbm.gf);
+  Q1.buffered := True;
+  Q1.CDS.CommandText  := 'Select ParentId as ChangeBOM from ApplyRevisions where bomid = :itemid';
+  Q1.CDS.Params.ParamByName('itemid').AsString := Itemid;
+  Q1.CDS.Open;
+  if Q1.CDS.isempty then begin
+    Q1.CDS.close;
+    Q1 := Txds.create('Q1',nil,dbm.Connection,dbm.gf);
+    Q1.buffered := true;
+    Q1.CDS.CommandText  := 'Select BOMID as ChangeBOM from BOMTree where ChildId = :itemid';
+    Q1.CDS.Params.ParamByName('itemid').AsString := ItemId;
+    Q1.CDS.Open;
+  end;
+  While not Q1.CDS.eof do begin
+    ApplyBOMChange(Q1.CDS.Fieldbyname('ChangeBOM').asstring, ItemId, CIns);
+    Q1.CDS.Next;
+  end;
+  Q1.CDS.close;
+  Q1.Free;
+  Q2.Free;
+end;
+
+function TBOM.SerializeOrderno(childid :String; orderno :Integer): Integer;
+var Q1, Q2 :TXDS;
+    Pid, Cid :String;
+    uorderno :integer;
+Begin
+//  Q1 := CreateQuery('SO__0', Databasename, DM);
+  Q1 := dbm.GetXDS(nil);
+  Q2 := dbm.GetXDS(nil);
+  q1.buffered := True;
+  Q1.CDS.CommandText := 'select * from bomtemp where BOMId = :prmbomid order by orderno';
+  Q1.CDS.Params[0].AsString := childid;
+  Q1.CDS.Open;
+
+  Pid := '0';
+  Cid := '0';
+  uorderno := orderno + 1;
+  While not Q1.Eof do begin
+    Q2.SQL.Text := 'update bomtemp set orderno = :prmuord where bomid = :prmbomid and parentid = :prmparentid and childid = :prmchildid and orderno = :prmord';
+    Q2.ParamByName('prmuord').AsInteger := uorderno;
+    Q2.ParamByName('prmbomid').AsString := childid;
+    Q2.ParamByName('prmparentid').AsString := Q1.CDS.fieldbyname('parentid').AsString;
+    Q2.ParamByName('prmchildid').AsString := Q1.CDS.fieldbyname('childid').AsString;
+    Q2.ParamByName('prmord').AsInteger := Q1.CDS.fieldbyname('orderno').AsInteger;
+    Q2.ExecSQL;
+    Pid := Q1.CDS.fieldbyname('parentid').AsString;
+    Cid := Q1.CDS.fieldbyname('childid').AsString;
+    Q1.CDS.Next;
+    if ((Q1.CDS.fieldbyname('parentid').AsString <> Pid) or (Q1.CDS.fieldbyname('childid').AsString <> Cid)) then inc(uorderno);
+  end;
+
+  Result := Q1.CDS.RecordCount + 1;
+  Q1.Close;
+  Q1.Free;
+  Q2.Free;
+end;
+
+procedure TBOM.ApplyBOMChange(BOMId, ItemId :String;InsCount:integer);
+var AQ0, AQ1, AQ2, AQ3, AQ4, AQ5, AQ6, AQ7, AQ8 : TXDS;
+    StartOrder, EndOrder: Integer;
+begin
+//  AQ0 := CreateQuery('ABC__0', Databasename, DM);
+  AQ0 := dbm.GetXDS(nil);
+  AQ0.SQL.Text := 'Insert into bomtemp select * from bomtree where BOMId = :Itemid';
+
+  AQ1 := dbm.GetXDS(nil);;
+  AQ1.SQL.Text := 'Select * from BOMTree where BOMId = :BOMId and ChildId = :ItemId';
+  AQ1.parambyname('bomid').asstring := BOMId;
+  AQ1.parambyname('itemid').asstring := ItemId;
+
+  AQ2 := dbm.GetXDS(nil);
+  AQ2.SQL.Text := 'Select Min(OrderNo) As MaxOrd from BOMTree where BOMId = :BomId and OrderNo > :StartOrder and LevelNo <= :LevelNo';
+
+  AQ3 := dbm.GetXDS(nil);
+  AQ3.SQL.Text := 'Delete from BOMTree where BOMId = :Bomid and OrderNo >= :StartOrder and OrderNo <= :EndOrder';
+
+  AQ4 := dbm.GetXDS(nil);
+  AQ4.SQL.Text := 'Update BOMTree Set OrderNo = OrderNo + :RCount where BOMId = :BOMId and OrderNo > :EndOrder';
+
+  AQ5 := dbm.GetXDS(nil);
+  AQ5.SQL.Text := 'Select count(*) from BOMTemp where rstatus = ''n''';
+
+  AQ6 := dbm.GetXDS(nil);
+  AQ6.SQL.Text := 'Update BOMTemp set OrderNo = :StartOrder + OrderNo, BOMId = :BOMId, LevelNo = LevelNo + :ParentLevel';
+
+  AQ7 := dbm.GetXDS(nil);
+  AQ7.SQL.Text := 'insert into bomtree select * from bomtemp';
+
+  AQ8 := dbm.GetXDS(nil);
+  AQ8.SQL.Text := 'delete from bomtemp';
+  AQ8.ExecSQL;
+
+  AQ1.Open;
+  //'Select * from BOMTree where BOMId = :BOMId and ChildId = :ItemId';
+  While not AQ1.eof do begin
+    //Insert the new records into temp table
+    //'Insert into bomtemp select * from bomtree where BOMId = :Itemid';
+    AQ0.parambyname('itemid').asstring := Itemid;
+    AQ0.ExecSQL;
+
+    StartOrder := AQ1.Fieldbyname('OrderNo').asinteger+1;
+    //'Select Min(OrderNo) As MaxOrd from BOMTree where BOMId = :BomId and OrderNo > :StartOrder and LevelNo <= :LevelNo';
+    AQ2.close;
+    AQ2.parambyname('BomId').asstring := BOMId;
+    AQ2.parambyname('startorder').asinteger := startorder;
+    AQ2.parambyname('levelno').asinteger := AQ1.Fieldbyname('Levelno').asinteger;
+    AQ2.Open;
+    EndOrder := AQ2.Fields[0].AsInteger-1;
+    if EndOrder < 0 then EndOrder := 32000;
+
+    //Delete old items
+    //'Delete from BOMTree where BOMId = :Bomid and OrderNo >= :StartOrder and OrderNo <= :EndOrder';
+    AQ3.Parambyname('bomid').AsString := BOMId;
+    AQ3.Parambyname('startorder').AsInteger := startorder;
+    AQ3.Parambyname('endorder').asinteger := EndOrder;
+    AQ3.ExecSQL;
+
+    //Adjust OrderNo
+    //'Update BOMTree Set OrderNo = OrderNo + :RCount where BOMId = :BOMId and OrderNo > :EndOrder';
+    AQ4.Parambyname('rcount').asinteger := InsCount;
+    AQ4.Parambyname('bomid').asstring := BOMId;
+    AQ4.Parambyname('endorder').asinteger := EndOrder;
+    AQ4.ExecSQL;
+
+    //Change BOMId, LevelNo & OrderNo in BOMTemp
+    //'Update BOMTemp set OrderNo = :StartOrder + OrderNo, BOMId = :BOMId, LevelNo = 1+:ParentLevel';
+    AQ6.parambyname('startorder').asinteger := StartOrder-1;
+    AQ6.Parambyname('bomid').asstring := bomid;
+    AQ6.Parambyname('parentlevel').asinteger := AQ1.Fieldbyname('LevelNo').AsInteger;
+    AQ6.ExecSQL;
+
+    //Insert from BOMTemp to BOMTree
+    //'insert into bomtree select * from bomtemp';
+    AQ7.ExecSQL;
+
+    //Delete from BOMTemp
+    AQ8.ExecSQL;
+
+    AQ1.Next;
+  end;
+
+  AQ1.close;
+  AQ1.free;
+  AQ2.close;
+  AQ2.free;
+  AQ3.Free;
+  AQ4.free;
+  AQ5.Free;
+  AQ6.free;
+  AQ7.Free;
+  AQ8.Free;
+end;
+
+Procedure TBOM.ExplodeBOM();
+var Q1, Q2,GetBOMTag:TXDS;
+    Ts : TStringList;
+    XMLText : IXMLDocument;
+    fn : String;
+begin
+  XMLText := axp.GetBOMXML;
+  dbm.gf.dodebug.Msg('>>Executing Explode BOM');
+  Q1 := TXds.create('Q1',Nil,dbm.Connection,dbm.gf);
+  Q1.buffered := true;
+  Q1.CDS.CommandText  := 'Select * from CreateBOM';
+  Q1.CDS.open;
+  Q2 := Txds.create('Q2',Nil,dbm.Connection,dbm.gf);
+  Q2.buffered := true;
+  Q2.CDS.CommandText  := 'delete from createbom where itemid=:id';
+  While not Q1.CDS.eof do begin
+    if lowercase(Q1.CDS.Fieldbyname('BOMAction').AsString) = 'new' then
+      CreateBOM(Q1.CDS.Fieldbyname('ItemId').Asstring,XMLText.XML.text)
+    else
+      ReviseBOM(Q1.CDS.Fieldbyname('ItemId').Asstring,XMLText.XML.text);
+    Q2.CDS.Params.ParamByName('id').asstring := Q1.CDS.Fieldbyname('itemid').asstring;
+    Q2.CDS.Execute;
+    Q1.CDS.Next;
+  end;
+  Q1.CDS.close;
+  Q1.free;
+  Q2.Free;
+end;
+
+procedure TBOM.PrepareBOM(TableName, Itemid:String; EffectiveDate:TDateTime);
+var Q:TXDS;
+begin
+  if lowercase(copy(trim(itemid),1,6))='select' then begin
+    Q := dbm.getxds(nil);
+    Q.buffered := true;
+    if assigned(onreplacetemptable) then
+      itemid := onreplacetemptable(itemid);
+    Q.CDS.CommandText  := Itemid;
+    Q.Open;
+    while not Q.CDS.eof do begin
+      PrepareOneBOM(TableName, Q.CDS.Fields[0].asstring, EffectiveDate);
+      Q.CDS.Next;
+    end;
+    Q.destroy;
+  end else
+    PrepareOneBOM(TableName, Itemid, EffectiveDate);
+end;
+
+Procedure TBOM.PrepareOneBOM(TableName, Itemid:String; EffectiveDate:TDateTime);
+var Q, Q1, Q2, Q3, Q4, Q5:TXDS;
+    parent, child, rstatus, t : String;
+    ono, dellevel, levelno : integer;
+    edate : TDatetime;
+begin
+  dbm.gf.dodebug.Msg('>>Executing Prepare BOM-');
+  Q1 := dbm.GetXDS(nil);
+  Q1.buffered := True;
+  t := 'btemp'+inttostr(dbm.gf.sescount);
+  Q1.CDS.CommandText  := 'drop table '+t;
+  try
+  Q1.CDS.Execute;
+  except
+  end;
+  Q := dbm.GetXDS(nil);
+  Q.buffered := True;
+  //Q.SQL.Text := 'create table '+t+' as select * from bomtree where bomid = '+itemid+' and effectivedate <= '+quotedstr(formatdatetime('dd-mmm-yyyy', effectivedate))+' and orderno=1';
+  Q.CDS.CommandText  := 'create table '+t+' as select * from bomtree where 1=0';
+  Q.CDS.Execute;
+  Q1.CDS.CommandText  := 'insert into '+t+' (orderno, parentid, childid, bomid, parentqty, childqty, levelno) values (0,:itemid,:itemid,:itemid, 1,1,0)';
+  dbm.gf.dodebug.Msg('itemid - '+itemid);
+  //Q1.SQL.Text := 'update '+t+' set orderno=0, parentid=:itemid, childid=:itemid, parentqty=1, childqty=1, levelno=0';
+  Q1.CDS.Params.ParamByName('itemid').asstring := itemid;
+  Q1.CDS.Params.ParamByName('itemid').asstring := itemid;
+  Q1.CDS.Params.ParamByName('itemid').asstring := itemid;
+  Q1.CDS.Execute;
+
+  //Q.SQL.Text := 'insert into '+t+' select * from bomtree where bomid = :itemid and effectivedate <= :edate';
+  Q.CDS.CommandText := 'insert into '+t+' select * from bomtree where bomid = :itemid';
+  dbm.gf.dodebug.Msg('itemid - '+itemid);
+  Q.CDS.Params.ParamByName('itemid').asstring := itemid;
+  //Q.params[1].asdatetime := effectivedate;
+  Q.CDS.Execute;
+
+  Q1.CDS.CommandText := 'alter table '+t+' add connectno numeric(5)';
+  Q1.CDS.Execute;
+
+  Q1.CDS.CommandText  := 'update '+t+' set connectno=:c';
+  dbm.gf.dodebug.Msg('c - '+inttostr(dbm.gf.sescount));
+  Q1.CDS.Params.ParamByName('c').AsString := inttostr(dbm.gf.sescount);
+  Q1.CDS.Execute;
+
+  Q1.CDS.CommandText  := 'delete from '+tablename+' where connectno=:cno and bomid=:id';
+  dbm.gf.dodebug.Msg('cno - '+inttostr(dbm.gf.sescount));
+  dbm.gf.dodebug.Msg('id - '+itemid);
+  Q1.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+  Q1.CDS.Params.ParamByName('id').AsString := itemid;
+  Q1.CDS.Execute;
+
+  Q1.CDS.CommandText  := 'Insert into '+TableName+' select * from '+t;
+  Q1.CDS.Execute;
+
+  Q1.CDS.CommandText  := 'drop table '+t;
+  Q1.CDS.Execute;
+
+  Q2 := dbm.GetXDS(nil);
+  Q2.buffered := True;
+  Q2.CDS.CommandText  := 'delete from '+tablename+' where orderno = :ono and effectivedate = :edate and bomid=:bomid and connectno=:cno';
+
+  Q3 := dbm.GetXDS(nil);
+  Q3.buffered := true;
+  Q3.CDS.CommandText  := 'delete from '+tablename+' where orderno = :ono and effectivedate <= :edate and bomid=:bomid and connectno=:cno';
+
+  Q4 := dbm.GetXDS(nil);
+  Q4.buffered := true;
+  Q4.CDS.CommandText  := 'delete from '+tablename+' where orderno = :ono and bomid=:bomid and connectno=:cno';
+
+  Q5 := dbm.GetXDS(nil);
+  Q5.buffered := true;
+  Q5.CDS.CommandText  := 'delete from '+tablename+' where orderno = :ono and bomid=:bomid and connectno=:cno and effectivedate=:edate';
+
+  Q1.CDS.CommandText  := 'Select * from '+TableName+' where bomid = :bomid and connectno = :cno order by orderno, effectivedate';
+  Q1.CDS.Params.ParamByName('bomid').asstring := itemid;
+  Q1.CDS.Params.ParamByName('cno').asstring := inttostr(dbm.gf.sescount);
+  Q1.Open;
+  parent := Q1.CDs.fieldbyname('parentid').asstring;
+  child := Q1.CDS.Fieldbyname('childid').asstring;
+  ono := Q1.CDS.fieldbyname('orderno').asinteger;
+  edate := Q1.CDS.fieldbyname('effectivedate').asdatetime;
+  levelno := Q1.CDS.fieldbyname('levelno').asinteger;
+  rstatus := Q1.CDS.fieldbyname('rstatus').asstring;
+  dellevel := -1;
+  if q1.CDS.fieldbyname('effectivedate').asdatetime > effectivedate then begin
+    Q5.CDS.Params.ParamByName('ono').asString := inttostr(q1.CDS.fieldbyname('orderno').asinteger);
+    Q5.CDS.Params.ParamByName('bomid').asstring := itemid;
+    Q5.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+    Q5.CDS.Params.ParamByName('edate').asString := datetimetostr(q1.CDS.fieldbyname('effectivedate').asdatetime);
+    Q5.CDS.Execute;
+    dellevel := levelno;
+  end else if (Q1.CDS.fieldbyname('rstatus').asstring='d') then begin
+    Q3.CDS.Params.ParamByName('ono').asString := inttostr(Q3.CDS.Fieldbyname('orderno').asinteger);
+    Q3.CDS.Params.ParamByName('edate').asString := datetimetostr(edate);
+    Q3.CDS.Params.ParamByName('bomid').asstring := itemid;
+    Q3.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+    Q3.CDS.Execute;
+    dellevel := levelno;
+  end;
+  Q1.CDS.Next;
+  while not Q1.CDS.Eof do begin
+    if (Q1.CDS.fieldbyname('parentid').asstring = parent) and (Q1.CDS.fieldbyname('childid').asstring=child) then begin
+      if q1.CDS.fieldbyname('effectivedate').asdatetime > effectivedate then begin
+        Q5.CDS.Params.ParamByName('ono').asString := inttostr(q1.CDS.fieldbyname('orderno').asinteger);
+        Q5.CDS.Params.ParamByName('bomid').asString := itemid;
+        Q5.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+        Q5.CDS.Params.ParamByName('edate').asString := datetimetostr(q1.CDS.fieldbyname('effectivedate').asdatetime);
+        Q5.CDS.Execute;
+        q1.CDS.next;
+        continue;
+      end;
+      Q2.CDS.Params.parambyname('ono').asString := inttostr(ono);
+      Q2.CDS.Params.parambyname('edate').asString := Datetimetostr(edate);
+      Q2.CDS.Params.parambyname('bomid').asstring := itemid;
+      Q2.CDS.Params.parambyname('cno').asString := inttostr(dbm.gf.sescount);
+      Q2.CDS.Execute;
+      if Q1.fieldbyname('rstatus').asstring <> 'd' then dellevel := -1;
+    end;
+    if (dellevel>-1) then begin
+      if q1.CDS.fieldbyname('levelno').asinteger > dellevel then begin
+        Q4.CDS.Params.ParamByName('ono').asString := inttostr(q1.CDS.fieldbyname('orderno').asinteger);
+        Q4.CDS.Params.ParamByName('bomid').asstring := itemid;
+        Q4.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+        Q4.CDS.Execute;
+        q1.CDS.next;
+        continue;
+      end else begin
+        dellevel := -1;
+      end;
+    end;
+    parent := Q1.CDS.fieldbyname('parentid').asstring;
+    child := Q1.CDS.Fieldbyname('childid').asstring;
+    ono := Q1.CDS.fieldbyname('orderno').asinteger;
+    edate := Q1.CDS.fieldbyname('effectivedate').asdatetime;
+    levelno := Q1.CDS.fieldbyname('levelno').asinteger;
+    rstatus := Q1.CDS.fieldbyname('rstatus').asstring;
+    if q1.CDS.fieldbyname('effectivedate').asdatetime > effectivedate then begin
+      Q5.CDS.Params.ParamByName('ono').asString := inttostr(q1.CDS.fieldbyname('orderno').asinteger);
+      Q5.CDS.Params.ParamByName('bomid').asstring := itemid;
+      Q5.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+      Q5.CDS.Params.ParamByName('edate').asString := datetimetostr(q1.CDS.fieldbyname('effectivedate').asdatetime);
+      Q5.CDS.Execute;
+      dellevel := levelno;
+    end else if (Q1.CDS.fieldbyname('rstatus').asstring='d') then begin
+      Q3.CDS.Params.ParamByName('ono').asString := inttostr(Q1.CDS.Fieldbyname('orderno').asinteger);
+      Q3.CDS.Params.ParamByName('edate').asString := datetimetostr(edate);
+      Q3.CDS.Params.ParamByName('bomid').asstring := itemid;
+      Q3.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+      Q3.CDS.Execute;
+      dellevel := levelno;
+    end;
+
+    Q1.CDS.next;
+  end;
+  Q1.close;
+  Q1.CDS.CommandText := 'update '+tablename+' set orderno=orderno+1, levelno=levelno+1 where connectno=:cno and bomid=:id';
+  Q1.CDS.Params.ParamByName('cno').asString := inttostr(dbm.gf.sescount);
+  Q1.CDS.Params.ParamByName('id').AsString := itemid;
+  Q1.CDS.Execute;
+
+  Q1.destroy;
+  Q2.destroy;
+  q3.destroy;
+  q4.destroy;
+  q5.destroy;
+end;
+
+constructor TBOM.create;
+begin
+  inherited;
+  ords := TStringList.create;
+  rords := TStringList.create;
+  QList := TList.create;
+  Parents := TStringList.create;
+  OnReplaceTempTable := nil;
+end;
+
+destructor TBOM.destroy;
+begin
+  ords.clear;
+  ords.free;
+  rords.clear;
+  rords.free;
+  QList.free;
+  Parents.free;
+  inherited destroy;
+end;
+
+end.
+
+{
+ExplodeBOM
+----------
+Q1 = Select * from CreateBOM
+While not Q1.eof do begin
+  if Q1.BOMAction = 'new' then
+    CreateBOMTree(Q1.ItemId)
+  else
+    ReviseBOM(Q1.ItemId)
+  Q1.Next;
+end;
+
+CreateBOM(ItemId:String)
+------------------------
+Rename procedure BuildOneTree to CreateBOM & make following changes :
+Read SQL from InputSQL
+TableName is always BOMTree
+MaxLevel to be removed & a logic to be built for trapping cyclic reference.
+
+ReviseBOM(ItemId:String)
+------------------------
+Read bom ordernos into list.
+insert the elements given by revision sql into bomtree table.
+StartUpdateNo := -1
+RQ1 = Revision SQL.
+RQ1.open;
+Start loop RQ1
+  if new element
+    insert its children (read from bomtree) into bomtree
+    set orderno to max orderno in that bom while inserting
+    find the position of the rorderno of the first new element in the list.
+    insert into the list the new set of records at that point, set the StartUpdateNo to the
+    list index is lesser.
+  else if delete element
+    insert ints children (read from bomtree) into bomtree
+    set the effectivedate to the effectivedate of the element & rstatus to d for all these
+    elements.
+  end;
+end loop
+Start loop from
+
+CallApplyBOMChange
+
+
+
+ApplyBOMChange(BOMId, ItemId)
+-----------------------------
+AQ0 := Select * from inputsql where transid = 'xbom' and fieldname='createbom'
+AQ0 := insert into + ' ' + AQ0.SqlText
+AQ1 := Select * from BOMTree where BOMId = :BOMId and ChildId = :ItemId
+AQ1.Open;
+While not AQ1.eof do begin
+  StartOrder := AQ1.OrderNo
+  AQ2 := Select Max(OrderNo) MaxOrd from BOMTree where OrderNo > :StartOrder and LevelNo > AQ1.LevelNo
+  if AQ2.IsEmpty then EndOrder := StartOrder
+  AQ2 := Delete from BOMTree where BOMId = :Bomid and OrderNo between :StartOrder and :EndOrder
+  AQ2 := Update BOMTree Set OrderNo = OrderNo - :DelCount where OrderNo > :EndOrder
+  AQ2.Params[0].asinteger := EndOrder-StartOrder+1
+  AQ0.params[0].asstring := Itemid;
+  AQ0.ExecSQL;
+  AQ1.Next;
+end;
+
+
+PrepareBOM(TableName, Itemid, EffectiveDate:String)
+-------------------------------------------------------
+Insert into TableName select * from bomtree where bomid = :itemid
+PQ1 := Select * from bomtree where effectivedate <= :EffectiveDate order by orderno, effectivedate
+while not PQ1.eof do begin
+  PQ1.Next;
+  if (not PQ1.Eof) and (PQ1.ItemId=ItemId) then
+    PQ1.Delete;
+end;
+
+SQL to check
+------------
+select orderno, itemid, effectivedate, rstatus, levelno
+from bomtree b, itemmaster i
+where b.bomid = 10039000011338 and b.childid = i.itemmasterid
+order by orderno, effectivedate
+
+SQL to create fresh bomtree
+---------------------------
+delete from bomtree;
+delete from createbom;
+delete from applyrevisions;
+delete from revbomtable;
+delete from revboma;
+insert into createbom select * from createbom_bk
+
+
+}

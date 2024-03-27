@@ -1,0 +1,233 @@
+unit uConnect;
+{Prev : Copied from ver 10.3}
+{Copied from Axpert9-XE3\Ver 10.6}
+interface
+
+uses
+  SysUtils, Classes, Registry, Windows, Messages, dialogs, SQLExpr, ADODb,
+  IniFiles, Forms, DB,  uGeneralFunctions, XMLDoc, XMLIntf,variants;
+
+type
+  TOnReConnectToDatabase=function() : Boolean of object;
+  TXServerDate = function() : TDateTime of object;
+  
+  pConnection = ^TConnection;
+  TConnection = Record
+    ConnectionName, ProjectName, DbType, Driver, DbName, PWord ,MsDBverno , DbPwd ,DBDriver,URL: ansistring;
+    ConnectNo, SiteNo, dbtimeout : Integer;
+    LastNo : Extended;
+    dbx : TSQLConnection;
+    ado : TADOConnection;
+    ReConnectToDatabase : TOnReConnectToDatabase ;
+    ServerDateTime : TXServerDate;
+  end;
+
+  TPConnect = Class
+  private
+    AXAPPS : ansistring;
+   // procedure ReadConnections;
+
+  public
+    Connection : pConnection;
+    Connections : TList;
+    ErrorStr : ansistring;
+    xml,conXML : IXMLDocument;
+    ReConnectToDatabase : TOnReConnectToDatabase ;
+    dbtimeout : integer;
+    ServerDateTime : TXServerDate;
+    AxpLocalDB : Boolean;
+
+    procedure AddConnection(ConnectionName:ansistring);
+    procedure RemoteConnect(ConnectionName: ansistring);
+    function GetConnectionRecord(ConnectionName: ansistring; var Index: Integer): pConnection;
+    procedure RemoveConnection(ConnectionName: ansistring);
+    constructor create;
+    destructor Destroy; override;
+  end;
+
+
+  var   repositary : ansistring;
+implementation
+
+Constructor TPConnect.create;
+var
+fn : ansistring;
+begin
+  inherited;
+  AxpLocalDB := False;
+  dbtimeout := 0;
+  Connections := TList.create;
+    AXAPPS := 'axapps.xml';
+    with TStringList.Create do begin
+      fn := GetCurrentDir + '\' + AXAPPS;
+      if fileexists(fn) then
+      begin
+        try
+          LoadFromFile(fn);
+          xml := LoadXMLData(text);
+        except
+          on E:Exception do begin
+            showmessage(e.Message);
+            application.Terminate;
+          end
+        end;
+      end
+      else
+      begin
+         xml := LoadXMLData('<connections></connections>');
+         xml.SaveToFile(fn);
+      end;
+      destroy;
+    end;
+end;
+
+Destructor TPConnect.Destroy;
+begin
+  Connections.free;
+  inherited;
+end;
+
+procedure TPConnect.AddConnection(ConnectionName:ansistring);
+var i:integer;
+    n:ixmlnode;
+begin
+  if assigned(conXML) then
+  begin
+     xml := conXML;
+     n:=xml.DocumentElement;
+  end else begin
+    Repositary := GetCurrentDir + '\' +AXAPPS;
+    if fileexists(Repositary ) then
+    begin
+      with TStringList.Create do begin
+        LoadFromFile(Repositary);
+        xml := LoadXMLData(text);
+        destroy;
+      end;
+      n:=xml.DocumentElement.ChildNodes[connectionname];
+    end;
+  end;
+  i := -1;
+  Connection := GetConnectionRecord(ConnectionName, i);
+  if i < 0 then begin
+    New(Connection);
+    Connection.ConnectionName := ConnectionName;
+
+  //  Connection.ProjectName := lowercase(vartostr(n.ChildValues['dbuser']));
+    Connection.ProjectName := (vartostr(n.ChildValues['dbuser']));
+    if lowercase(vartostr(n.childvalues['db'])) = 'postgresql' then
+      Connection.DbType := 'postgre'
+    else
+      Connection.DbType := lowercase(vartostr(n.childvalues['db']));
+    Connection.MsDBverno:=Trim(vartostr(n.childvalues['version']));
+    Connection.DbName := lowercase(vartostr(n.childvalues['dbcon']));
+    if AxpLocalDB then
+      Connection.Driver := ''
+    else
+      Connection.Driver := lowercase(vartostr(n.childvalues['driver']));
+    Connection.DBDriver := lowercase(vartostr(n.childvalues['driver']));
+    Connection.PWord := vartostr(vartostr(n.childvalues['pwd']));
+    Connection.ServerDateTime := ServerDateTime;
+    Connection.ReConnectToDatabase := ReConnectToDatabase;
+    Connection.ConnectNo := -1;
+    Connections.Add(Connection);
+    Connection.dbx := nil;
+//    Connection.bde := nil;
+    Connection.Ado := nil;
+    if Connection.Driver = 'dbx' then
+      Connection.dbx := TSQLConnection.Create(nil)
+{    else if connection.driver = 'bde' then
+      Connection.bde := TDatabase.Create(nil)     }
+    else if connection.driver = 'ado' then
+    begin
+      Connection.ADO := TADOConnection.Create(nil);
+      if dbtimeout <> 0 then
+      begin
+        Connection.ADO.ConnectionTimeout := dbtimeout; // default time is 15 sec
+        Connection.ADO.CommandTimeout := dbtimeout;   // default time is 30 secs
+        Connection.dbtimeout := dbtimeout;
+      end else Connection.dbtimeout := 0;
+    end else
+      ErrorStr := 'Improper Driver';
+  end else Connection.PWord := vartostr(vartostr(n.childvalues['pwd']));
+end;
+
+procedure TPConnect.RemoteConnect(ConnectionName:ansistring);
+var i:integer;
+    n:ixmlnode;
+begin
+  if assigned(conXML) then
+  begin
+     xml := conXML;
+     n:=xml.DocumentElement;
+  end else begin
+    Repositary := GetCurrentDir + '\' +AXAPPS;
+    if fileexists(Repositary ) then
+    begin
+      with TStringList.Create do begin
+        LoadFromFile(Repositary);
+        xml := LoadXMLData(text);
+        destroy;
+      end;
+      n:=xml.DocumentElement.ChildNodes[connectionname];
+    end;
+  end;
+  i := -1;
+  Connection := GetConnectionRecord(ConnectionName, i);
+  if i < 0 then begin
+    New(Connection);
+    Connection.ConnectionName := ConnectionName;
+
+    //Connection.ProjectName := lowercase(vartostr(n.ChildValues['dbuser']));
+    Connection.ProjectName := vartostr(n.ChildValues['dbuser']);
+    Connection.DbType := lowercase(vartostr(n.childvalues['db']));
+    Connection.MsDBverno:=Trim(vartostr(n.childvalues['version']));
+    Connection.DbName := lowercase(vartostr(n.childvalues['dbcon']));
+    if AxpLocalDB then
+      Connection.Driver := ''
+    else
+      Connection.Driver := lowercase(vartostr(n.childvalues['driver']));
+    Connection.DBDriver := lowercase(vartostr(n.childvalues['driver']));
+    Connection.PWord := vartostr(vartostr(n.childvalues['pwd']));
+    //fetching remoteurl from axapp and assigning to URL
+    Connection.URL := vartostr(vartostr(n.childvalues['remoteurl']));
+    Connection.ConnectNo := -1;
+    Connections.Add(Connection);
+    Connection.dbx := nil;
+//    Connection.bde := nil;
+    Connection.Ado := nil;
+  end;
+end;
+
+
+Function TPConnect.GetConnectionRecord(ConnectionName:ansistring; var Index : Integer) : pConnection;
+var i:integer;
+begin
+  Result := nil;
+  Index := -1;
+//  ConnectionName := LowerCase(Trim(ConnectionName));
+  ConnectionName := (Trim(ConnectionName));
+  for i:=0 to Connections.count-1 do begin
+    if ConnectionName = pConnection(Connections[i]).ConnectionName then begin
+      Result := pConnection(Connections[i]);
+      Index := i;
+      break;
+    end;
+  end;
+end;
+
+procedure TPConnect.RemoveConnection(ConnectionName:ansistring);
+var i:integer;
+begin
+  Connection := GetConnectionRecord(ConnectionName, i);
+  if i < 0 then exit;
+  Dispose(Connection);
+  Connections.Delete(i);
+end;
+
+{procedure TPConnect.ReadConnections;
+begin
+
+end;
+ }
+end.
