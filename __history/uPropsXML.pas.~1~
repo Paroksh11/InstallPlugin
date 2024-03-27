@@ -1,0 +1,450 @@
+ unit uPropsXML;
+{Prev : copied from ver 10.2}
+{Copied from Axpert9-XE3\Ver 10.9\Fix2}
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, StdCtrls,XMLDoc, XMLIntf;
+
+const
+  xml_Name = 'a1';
+  xml_Caption = 'a2';
+  xml_Purpose = 'a59';
+//tstruct properties
+  xml_Transid        = 'a1';
+//  xml_Folder         = 'a3';
+  xml_SaveControl    = 'a4';
+  xml_DelControl     = 'a5';
+  xml_Track          = 'a6';
+  xml_NoChange       = 'a7';
+  xml_ExprSet        = 'a8';
+  xml_DateField      = 'a9';
+
+  xml_OnOpen         = 'a10';
+  xml_AfterLoadData  = 'a11';
+  xml_BeforeSave      = 'a12';
+  xml_AfterSave      = 'a13';
+  xml_BeforeDelete   = 'a14';
+  xml_AfterDelete    = 'a15';
+  xml_navigate = 'a16';
+  xml_TreeParents  = 'a17';
+  xml_Attach = 'a18';
+  xml_SearchCondition = 'a19';
+  xml_ListView = 'a20';
+  xml_TrackUsers = 'a21';
+  xml_TrackFields = 'a22';
+  xml_BlockSize  = 'a23';
+  xml_Schema = 'a24';
+  xml_WorkFlow = 'a25';
+  xml_SaveDraft = 'a26';
+  xml_Traceability = 'a27';     //ch1
+  xml_CachingType = 'a28';
+  xml_DcNavigation = 'a29';
+  xml_Pos = 'a30';
+
+//dc properties
+  xml_FrameNo        = 'a3';
+  xml_PageNo         = 'a4';
+  xml_Table          = 'a5';
+  xml_AsGrid         = 'a6';
+  xml_AllowChange = 'a7';
+  xml_Pop = 'a8';
+  xml_PopUp = 'a9';
+  xml_PopParent = 'a10';
+  xml_PopControl = 'a11';
+  xml_PopOn = 'a12';
+  xml_PopValidate = 'a13';
+  xml_dcborder='a14';
+
+  xml_OnEnterDC='a15';
+  xml_OnExitDC='a16';
+  xml_DcAllowEmpty='a17';
+  xml_Heading='a18';
+  xml_ParentDC='a19';
+  xml_ParentFlds='a20';
+  xml_ShowButton='a21';
+  xml_PopAutoShow='a22';
+  xml_PopCondition='a23';
+  xml_AutoFill='a24';
+  xml_DispSum='a25';
+  xml_AddDcRows='a26';
+  xml_DeleteDcRows='a27';
+
+//fields properties
+  xml_DataType = 'a3';
+  xml_DataWidth = 'a4';
+  xml_Dec = 'a5';
+  xml_MOE = 'a6';
+  xml_Details = 'a7';
+  xml_Hide = 'a8';
+  xml_Empty = 'a9';
+  xml_ReadOnly = 'a10';
+  xml_SetCarry = 'a11';
+  xml_Save = 'a12';
+  xml_Expr = 'a13';
+  xml_VExp = 'a14';
+  xml_Duplicate = 'a15';
+  xml_OnlyPositive = 'a16';
+  xml_SourceKey = 'a17';
+  xml_CField = 'a18';
+  xml_DispTot = 'a19';
+  xml_SGWidth = 'a20';
+  xml_SGHeight = 'a21';
+  xml_SQL = 'a22';
+  xml_AutoSelect = 'a23';
+  xml_Refresh = 'a24';
+  xml_List = 'a25';
+  xml_Source = 'a26';
+  xml_FParent = 'a27';
+  xml_FSource = 'a28';
+  xml_SourceTable = 'a29';
+  xml_Suggestive = 'a30';
+  xml_gui = 'a31';
+  xml_cwidth = 'a32';
+  xml_tlhw = 'a33';
+  xml_cfont = 'a34';
+  xml_ccolor = 'a35';
+  xml_bordercolor = 'a36';
+  xml_showsno='a37';
+  xml_Trans = 'a40';
+  xml_Sequence = 'a41';
+  xml_Prefix = 'a42';
+  xml_Desc = 'a43';
+  xml_StartNo = 'a44';
+  xml_SActive = 'a45';
+  xml_PrefixField = 'a53';
+  xml_Digits = 'a54';
+
+  xml_OnEnterField='a46';
+  xml_OnExitField='a47';
+
+  xml_Mask = 'a48';
+  xml_Pattern = 'a49';
+  xml_PWordChar = 'a50';
+  xml_Hint = 'a51';
+  xml_ApplyComma = 'a52';
+  xml_CValidate = 'a55';
+  xml_FormCtrl  = 'a56';
+  xml_ExprFlds = 'a57';
+  xml_Deps = 'a58';
+  xml_DetStruct = 'a60';
+  xml_DetTransid = 'a61';
+  xml_DetMap = 'a62';
+  xml_Dynamic = 'a63';
+  xml_SearchSQL = 'a64';
+  xml_displaydetail = 'a65';
+  xml_ParentDeps = 'a66'; //only for web
+  xml_Tabstop ='a67';     // focus the read only field
+  xml_CustDType = 'a69';
+  xml_TableTypeDetails = 'a70';
+//fillgrid properties;
+  xml_IView = 'a2';
+  xml_FGCaption = 'a4';
+  xml_FGSQL = 'a5';
+  xml_FGTarget = 'a6';
+  xml_FMap = 'a7';
+  xml_Multi = 'a8';
+  xml_AutoShow = 'a9';
+  xml_SourceDC = 'a10';
+  xml_FGValidate = 'a11';
+  xml_OnFill = 'a12';
+  xml_ExeOnSave = 'a13';
+  xml_FirmBind = 'a14';
+  xml_SelectOn = 'a15';
+  xml_FooterStr = 'a16';
+  xml_FGVExp  = 'a17';
+  xml_AddRows  = 'a18';
+  xml_FGColProps = 'a19';
+  xml_SelectAllRows = 'a20';
+
+//genmap properties;
+  xml_GenTarget = 'a3';
+  xml_GenParent = 'a4';
+  xml_GenControl = 'a5';
+  xml_Active = 'a6';
+  xml_GenCField = 'a7';
+  xml_GMap = 'a8';
+  xml_OnPost = 'a9';
+  xml_GenTransId = 'a10';
+  xml_OnApprove = 'a17'; // this is applicable for mdmap also.
+  xml_OnReject = 'a18'; // this is applicable for mdmap also.
+
+//mdmap properties
+  xml_Master = 'a3';
+  xml_MField = 'a4';
+  xml_DField = 'a5';
+  xml_MSField = 'a6';
+  xml_DSField = 'a7';
+  xml_MTable = 'a8';
+  xml_Type = 'a9';
+  xml_Tree = 'a10';
+  xml_MDControl = 'a11';
+  xml_Append = 'a12';
+  xml_InitOnDel = 'a13';
+  xml_MasterFieldDec = 'a14';
+  xml_MapText = 'a15';
+  xml_Extended = 'a16';
+type
+  TPropsXML = class
+  private
+    xml : IXMLDocument;
+    pnode : IXMLNode;
+    procedure TStructProps;
+    procedure AddProps(tnode: IXMLNode; tagname, caption, tagtype, tagdesc,
+      defval, hide: String);
+    procedure DCProps;
+    procedure InputFieldProps;
+    procedure FillGridProps;
+    procedure GenMapProps;
+    procedure MDMapProps;
+    { Private declarations }
+  public
+    Constructor Create; virtual;
+    Destructor Destroy; override;
+    function ConstructXML:IXMLDocument;
+    { Public declarations }
+  end;
+
+
+implementation
+
+
+Constructor TPropsXML.Create;
+begin
+  inherited Create;
+end;
+
+Destructor TPropsXML.Destroy;
+begin
+  xml := nil;
+  inherited;
+end;
+function TPropsXML.ConstructXML:IXMLDocument;
+begin
+  xml := LoadXMLData('<root></root>');
+  TStructProps;
+  DCProps;
+  InputFieldProps;
+  FillGridProps;
+  GenMapProps;
+  MDMapProps;
+  result := xml;
+end;
+
+
+
+procedure TPropsXML.AddProps(tnode:IXMLNode;tagname,caption,tagtype,tagdesc,defval,hide:String);
+var xnode : IXMLNode;
+begin
+  xnode :=  tnode.ChildNodes.FindNode(tagname);
+  if not assigned(xnode) then
+    xnode := tnode.AddChild(tagname);
+  xnode.Attributes['cap'] := caption;
+  xnode.Attributes['type'] := tagtype;
+  xnode.Attributes['desc'] := tagdesc;
+  xnode.Attributes['hide'] := hide;
+  xnode.NodeValue := defval;
+  xnode := nil;
+end;
+
+procedure TPropsXML.TStructProps;
+begin
+  pnode := xml.DocumentElement.AddChild('tstruct');
+  AddProps(pnode,xml_Transid,'TransId','accept','','TSt1','f');
+  AddProps(pnode,xml_Caption,'Caption','accept','','TStDesc1','f');
+//  AddProps(pnode,xml_Folder,'Folder','select','menugroup','','f');
+  AddProps(pnode,xml_SaveControl,'SaveControlField','select','fields','','f');
+  AddProps(pnode,xml_DelControl,'DeleteControlField','select','fields','','f');
+  AddProps(pnode,xml_Track,'TrackChanges','others','trackdialog','','f');
+//  AddProps(pnode,xml_NoChange,'NoChange','select','!True,False','False','f');
+//  AddProps(pnode,xml_ExprSet,'ExpressionSet','others','exprsetdialog','','f');
+  AddProps(pnode,xml_DateField,'DateField','select','fields','','t');
+
+  AddProps(pnode,xml_OnOpen,'OnOpenTStruct','select','actions','','t');
+  AddProps(pnode,xml_AfterLoadData,'AfterLoadData','select','actions','','t');
+  AddProps(pnode,xml_BeforeSave,'BeforeSave','select','actions','','t');
+  AddProps(pnode,xml_AfterSave,'AfterSave','select','actions','','t');
+  AddProps(pnode,xml_BeforeDelete,'BeforeDelete','select','actions','','t');
+  AddProps(pnode,xml_AfterDelete,'AfterDelete','select','actions','','t');
+  AddProps(pnode,xml_Navigate,'ShowNavigation','accept','','t','t');
+  AddProps(pnode,xml_TreeParents,'TreeParents','select','fields','','t');
+  AddProps(pnode,xml_Attach,'Attachment','select','!True,False','False','f');
+  AddProps(pnode,xml_SearchCondition,'SearchCondition','others','conddialog','','f');
+  AddProps(pnode,xml_ListView,'ListView','select','!True,False','True','f');
+//  AddProps(pnode,xml_BlockSize,'BlockSize','select','!Day,Week,Month,','','f'); //ch1
+  AddProps(pnode,xml_Schema,'Schema','accept','','','f');
+  AddProps(pnode,xml_WorkFlow,'WorkFlow','select','!True,False','False','f');
+  AddProps(pnode,xml_Purpose,'Purpose','others','purposedialog','','f');
+  AddProps(pnode,xml_SaveDraft,'SaveDraft','select','!True,False','False','f');
+  AddProps(pnode,xml_Traceability,'Traceability','select','!True,False','False','f'); //ch1
+  AddProps(pnode,xml_CachingType,'CachingType','select','!None,InMemory,Session','None','f'); //ch1
+  AddProps(pnode,xml_DcNavigation,'DC Navigation','select','!Default,Wizard','Default','f');
+  AddProps(pnode,xml_Pos,'PosScreen','select','!True,False','False','f');
+end;
+
+
+procedure TPropsXML.DCProps;
+begin
+  pnode := xml.DocumentElement.AddChild('dc');
+  AddProps(pnode,xml_Name,'Name','accept','','','f');
+  AddProps(pnode,xml_Caption,'Caption','accept','','','f');
+  AddProps(pnode,xml_FrameNo,'FrameNo','accept','','','t');
+  AddProps(pnode,xml_Pageno,'PageNo','accept','','','t');
+  AddProps(pnode,xml_Table,'TableName','accept','','','f');
+  AddProps(pnode,xml_AsGrid,'AsGrid','select','!True,False','False','f');
+  AddProps(pnode,xml_AllowChange,'AllowChange','select','!True,False','True','f');
+  AddProps(pnode,xml_DcAllowEmpty,'AllowEmpty','select','!True,False','True','f');
+  AddProps(pnode,xml_AddDcRows,'AddDcRows','select','!True,False','True','f');
+  AddProps(pnode,xml_DeleteDcRows,'DeleteDcRows','select','!True,False','True','f');
+
+//  AddProps(pnode,xml_Pop,'Pop','select','!True,False','False','f');
+  AddProps(pnode,xml_PopUp,'Popup','others','popupdialog','','f');
+
+  AddProps(pnode,xml_dcborder,'dcborder','accept','','','t');
+  AddProps(pnode,xml_gui,'gui','accept','','','t');
+  AddProps(pnode,xml_cwidth,'cwidth','accept','','','t');
+  AddProps(pnode,xml_tlhw,'tlhw','accept','','','t');
+  AddProps(pnode,xml_cfont,'cfont','accept','','','t');
+  AddProps(pnode,xml_ccolor,'ccolor','accept','','','t');
+  AddProps(pnode,xml_bordercolor,'bordercolor','accept','','','t');
+  AddProps(pnode,xml_showsno,'showsno','accept','','','t');
+
+  AddProps(pnode,xml_OnEnterDC,'OnEnter','select','actions','','t');
+  AddProps(pnode,xml_OnExitDC,'OnExit','select','actions','','t');
+
+  AddProps(pnode,xml_Purpose,'Purpose','others','purposedialog','','f');
+
+end;
+
+procedure TPropsXML.InputFieldProps;
+begin
+  pnode := xml.DocumentElement.AddChild('field');
+  AddProps(pnode,xml_Name,'Name','accept','','inputfield1','f');
+  AddProps(pnode,xml_Caption,'Caption','accept','','inputfield1','f');
+  AddProps(pnode,xml_CustDType,'CustomDataType','select','custtype','','f');
+  AddProps(pnode,xml_DataType,'DataType','select','!Character,Numeric,Date/Time,Image,Text','Character','f');
+  AddProps(pnode,xml_DataWidth,'DataWidth','accept','','10','f');
+  AddProps(pnode,xml_Dec,'Decimal','accept','','0','f');
+  AddProps(pnode,xml_MOE,'ModeOfEntry','select','!Accept,Calculate,AutoGenerate,Select,Fill','Accept','f');
+  AddProps(pnode,xml_Details,'Details','others','listdialog','','f');
+  AddProps(pnode,xml_Hide,'Hidden','select','!True,False','False','f');
+  AddProps(pnode,xml_Empty,'AllowEmpty','select','!True,False','True','f');
+  AddProps(pnode,xml_ReadOnly,'ReadOnly','select','!True,False','False','f');
+  AddProps(pnode,xml_SetCarry,'SetCarry','select','!True,False','False','f');
+  AddProps(pnode,xml_Save,'SaveValue','select','!True,False','True','f');
+  AddProps(pnode,xml_Expr,'Expression','others','exprdialog','','f');
+  AddProps(pnode,xml_VExp,'ValidateExpression','others','exprdialog','','f');
+  AddProps(pnode,xml_Duplicate,'AllowDuplicate','select','!True,False','True','f');
+  AddProps(pnode,xml_OnlyPositive,'OnlyPositive','select','!True,False','True','f');
+  AddProps(pnode,xml_SourceKey,'SourceKey','select','!True,False','False','t');
+//  AddProps(pnode,xml_CField,'CompNameField','select','fields','','f');
+  AddProps(pnode,xml_DispTot,'DisplayTotal','select','!True,False','False','t');
+  AddProps(pnode,xml_ApplyComma,'ApplyComma','select','!True,False','True','f');
+//  AddProps(pnode,xml_SGWidth,'SGridWidth','accept','','0','f');
+//  AddProps(pnode,xml_SGHeight,'SGridHeight','accept','','0','f');
+
+  AddProps(pnode,xml_gui,'gui','accept','','','t');
+  AddProps(pnode,xml_cwidth,'cwidth','accept','','','t');
+  AddProps(pnode,xml_tlhw,'tlhw','accept','','','t');
+  AddProps(pnode,xml_cfont,'cfont','accept','','','t');
+  AddProps(pnode,xml_ccolor,'ccolor','accept','','','t');
+  AddProps(pnode,xml_bordercolor,'bordercolor','accept','','','t');
+  AddProps(pnode,xml_showsno,'showsno','accept','','','t');
+
+  AddProps(pnode,xml_OnEnterField,'OnEnter','select','actions','','t');
+  AddProps(pnode,xml_OnExitField,'OnExit','select','actions','','t');
+
+  AddProps(pnode,xml_Mask,'Mask','accept','','','f');
+  AddProps(pnode,xml_Pattern,'Pattern','accept','','','f');
+  AddProps(pnode,xml_PWordChar,'PasswordCharacter','accept','','','f');
+  AddProps(pnode,xml_Hint,'Hint','accept','','','f');
+  AddProps(pnode,xml_CValidate,'ClientValidation','select','!True,False','True','f');
+  AddProps(pnode,xml_FormCtrl,'FormControl','accept','','','t');
+  AddProps(pnode,xml_ExprFlds,'ExprFieldList','accept','','','t');
+  AddProps(pnode,xml_Deps,'Dependencies','accept','','','t');
+  AddProps(pnode,xml_SearchSQL,'SearchSQL','others','searchdialog','','f');
+  AddProps(pnode,xml_Purpose,'Purpose','others','purposedialog','','f');
+  AddProps(pnode,xml_DetStruct,'DetailStructure','others','detstructdialog','','t');
+  AddProps(pnode,xml_displaydetail,'DisplayDetail','others','dispdetaildialog','','f');
+  AddProps(pnode,xml_Tabstop,'TabStop','select','!True,False','','f');                   // focus the read only field
+  AddProps(pnode,xml_TableTypeDetails,'TableTypeDetails','accept','','','f');
+end;
+
+procedure TPropsXML.FillGridProps;
+begin
+  pnode := xml.DocumentElement.AddChild('fillgrid');
+  AddProps(pnode,xml_Name,'Name','accept','','','f');
+  AddProps(pnode,xml_IView,'From Iview','select','False','False','t'); //ch1
+//  AddProps(pnode,xml_IView,'From Iview','select','!True,False','False','f');
+  AddProps(pnode,xml_FrameNo,'FrameNo','accept','','','t');
+  AddProps(pnode,xml_FGCaption,'Caption','accept','','','f');
+  AddProps(pnode,xml_FGSQL,'SQL','others','sqldialog','','f');
+  AddProps(pnode,xml_FGTarget,'TargetDC','select','griddcs','','f');
+  AddProps(pnode,xml_FMap,'MapDetails','others','fgmapdialog','','f');
+  AddProps(pnode,xml_Multi,'MultiSelect','select','!True,False','True','f');
+  AddProps(pnode,xml_AutoShow,'AutoShow','select','!True,False','False','f');
+  AddProps(pnode,xml_SourceDC,'SourceDC','select','dcs','','f');
+  AddProps(pnode,xml_FGValidate,'Validate','select','!True,False','False','f');
+  AddProps(pnode,xml_OnFill,'OnFill','select','actions','','t');
+  AddProps(pnode,xml_ExeOnSave,'ExecuteOnSave','select','!True,False','False','f');
+  AddProps(pnode,xml_FirmBind,'Firm Bind','select','!True,False','False','f');
+  AddProps(pnode,xml_SelectOn,'SelectOn','select','!OnClick,OnDoubleClick','OnClick','f');
+  AddProps(pnode,xml_FooterStr,'FooterString','others','footerdialog','','f');
+  AddProps(pnode,xml_FGVExp,'ValidateExpression','others','valexprdiaglog','','f');
+  AddProps(pnode,xml_AddRows,'AddRows','select','!"Add only when grid is empty","Initialize grid and add","Append rows to grid"','Add only when grid is empty','f');
+  AddProps(pnode,xml_FGColProps,'ColumnProperty','others','fgcolpropsdialog','','f');
+  AddProps(pnode,xml_SelectAllRows,'AutoSelectAllRows','select','!True,False','False','f');
+  AddProps(pnode,xml_Purpose,'Purpose','others','purposedialog','','f');
+end;
+
+procedure TPropsXML.GenMapProps;
+begin
+  pnode := xml.DocumentElement.AddChild('genmap');
+  AddProps(pnode,xml_Name,'Name','accept','','','f');
+  AddProps(pnode,xml_Caption,'Caption','accept','','','f');
+  AddProps(pnode,xml_GenTarget,'TargetTStruct','select','tstructs','','f');
+  AddProps(pnode,xml_GenParent,'Based On DC','select','dcs','','f');
+  AddProps(pnode,xml_GenControl,'ControlFieldName','select','fields','','f');
+  AddProps(pnode,xml_Active,'Active','select','!True,False','False','f');
+  AddProps(pnode,xml_GenCField,'Schema of Target','select','fields','','f');
+  AddProps(pnode,xml_GMap,'Map','others','genmapdialog','','f');
+  AddProps(pnode,xml_OnPost,'OnPost','others','genonpost','','f');
+  AddProps(pnode,xml_Purpose,'Purpose','others','purposedialog','','f');
+  AddProps(pnode,xml_onApprove,'OnApprove','select','!True,False','False','f');
+  AddProps(pnode,xml_OnReject,'OnReject','select','!True,False','False','f');
+//  AddProps(pnode,xml_OnPost,'OnPost','select','actions','','f');
+//  AddProps(pnode,xml_GenTransId,'accept','','','t');
+
+end;
+
+procedure TPropsXML.MDMapProps;
+begin
+  pnode := xml.DocumentElement.AddChild('mdmap');
+  AddProps(pnode,xml_Name,'Name','accept','','','f');
+  AddProps(pnode,xml_Caption,'Caption','accept','','','f');
+  AddProps(pnode,xml_Extended,'Extended','select','!True,False','False','f');
+  AddProps(pnode,xml_Master,'MasterTransaction','select','tstructs','','f');
+  AddProps(pnode,xml_MField,'MasterField','select','transfields','','f');
+  AddProps(pnode,xml_DField,'DetailField','select','fields','','f');
+  AddProps(pnode,xml_MSField,'MasterSearchField','select','transfields','','f');
+  AddProps(pnode,xml_DSField,'DetailSearchField','select','fields','','f');
+  AddProps(pnode,xml_MTable,'MasterTable','accept','','','f');
+  AddProps(pnode,xml_Type,'UpdateType','select','!Add,Less,Highest,Lowest,Inc,Dec,Replace','','f');
+////  AddProps(pnode,xml_Tree,'TreeUpdate','select','!True,False','False','f');
+  AddProps(pnode,xml_MDControl,'ControlField','select','fields','','f');
+  AddProps(pnode,xml_Append,'Append','select','!True,False','False','f');
+  AddProps(pnode,xml_InitOnDel,'InitOnDel','select','!True,False','True','f');
+  AddProps(pnode,xml_MapText,'MapText','others','mdmapdialog','','f');
+  AddProps(pnode,xml_MasterFieldDec,'MasterFieldDec','accept','','0','t');
+  AddProps(pnode,xml_Purpose,'Purpose','others','purposedialog','','f');
+  AddProps(pnode,xml_onApprove,'OnApprove','select','!True,False','False','f');
+  AddProps(pnode,xml_OnReject,'OnReject','select','!True,False','False','f');
+end;
+
+end.
+
+
+
+
+

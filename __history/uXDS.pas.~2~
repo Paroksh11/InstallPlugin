@@ -1,0 +1,3384 @@
+unit uXDS;
+{ Copied from  Ver 10.9/WebFix1}
+{ Copied from Axpert9-XE3\Ver 11.0}
+{Copied from Axpert9-XE3\Ver 11.0\Action_DBConn_Lost}
+{ Copied from Axpert9-XE3\Ver 11.1}
+
+interface
+uses
+  SysUtils, Classes, Registry, Windows, Messages, dialogs, SQLExpr, ADODb,
+  DbClient, Provider, uConnect, Data.DB, Data.DBXCommon, Controls, Variants, Math ,
+  uGeneralFunctions, XMLDoc, XMLIntf,uCompress, Types, uDoDebug ,DateUtils,midaslib,Forms,
+  StrUtils;
+
+type
+
+  TXSetValue = procedure(Name, Value:String) of object;
+
+  TXField = class
+  private
+
+    gf : TGeneralFunctions;
+    Connection : pConnection;
+    procedure SetInt(i:integer);
+    procedure SetExt(x:Extended);
+    procedure SetDtm(d:TDateTime);
+    procedure SetDte(d:TDate);
+    procedure SetBool(b:boolean);
+    function GetInt : integer;
+    function GetExt : extended;
+    function GetDtm : TDateTime;
+    function GetDte : TDate;
+    function GetStr: String;
+    procedure SetStr(S: String);
+    function GetBool:Boolean;
+
+  public
+    name, value : String;
+    XSetValue : TXSetValue;
+    DataType : TFieldType;
+    DataSize : integer;
+    property AsInteger : Integer read GetInt write SetInt;
+    property AsFloat : extended read GetExt write SetExt;
+    property AsString : String read GetStr write SetStr;
+    property AsDateTime : TDateTime read GetDtm write SetDtm;
+    property AsDate : TDate read GetDte write SetDte;
+    property AsBoolean : Boolean read GetBool write SetBool;
+  end;
+
+  TXParam = class
+  private
+
+    gf : TGeneralFunctions;
+    Connection : pConnection;
+    procedure SetInt(i:integer);
+    procedure SetExt(x:Extended);
+    procedure SetDtm(d:TDateTime);
+    procedure SetDte(d:TDate);
+    function GetInt : integer;
+    function GetExt : extended;
+    function GetDtm : TDateTime;
+    function GetDte : TDate;
+    function GetStr: String;
+    procedure SetStr(S: String);
+
+  public
+    name, value : String;
+    XSetValue : TXSetValue;
+    DataType : TFieldType;
+
+    property AsInteger : Integer read GetInt write SetInt;
+    property AsFloat : extended read GetExt write SetExt;
+    property AsString : String read GetStr write SetStr;
+    property AsDateTime : TDateTime read GetDtm write SetDtm;
+    property AsDate : TDate read GetDte write SetDte;
+  end;
+
+  TXFieldByName = function(s:String) : TXField of object;
+  TXParamByName = function(s:String) : TXParam of object;
+  TXSetSQL = procedure(s:TStringList) of object;
+  TXGetSQL = function : TStringList of object;
+  TXSetSQLText = procedure(s:String) of object;
+  TXGetSQLText = function : String of object;
+  TXOpen = procedure of object;
+  TXEof = function : boolean of object;
+  TXInsert = procedure(table:String) of object;
+  TXUpdate = procedure(table, where : String) of object;
+  TXFindRecord = function(table, where :String):boolean of object;
+  TXSetActive = procedure(f:boolean) of object;
+  TXAssignParam = procedure(ParamNo:integer; ParamValue, ParamType:String) of object;
+  TXQuote = function(tablename:String) : String of object;
+  TXWriteMemo=procedure(fname, table,where,filename:String) of object;
+  TXWriteStream=procedure(fname, table,where:String;stm:TStringStream ;isblob:boolean=false) of object;
+  TXReadMemo=procedure(fname, filename:String) of object;
+  TXReadStream=procedure(fname,sname :String ; stm : TStringStream) of object;
+  TXWriteBlob=procedure(fname, table,where,filename:String) of object;
+  TXReadBlob=procedure(fname, filename:String) of object;
+  TXStoredProcExec = function(spname,invars,outvars:String) : String of object;
+
+  TXDS = Class(TComponent)
+  private
+    fcds : boolean;
+    xfield : TXField;
+    XParam : TXParam;
+    XFieldByName : TXFieldByName;
+    XParamByName : TXParamByName;
+    xsetsql : TXsetsql;
+    xgetsql : TXgetSQL;
+    xsetsqltext : TXsetsqltext;
+    xgetsqltext : TXgetSQLtext;
+    XOpen : TXOpen;
+    XClose : TXOpen;
+    xexecsql : TXOpen;
+    xeof : TXEof;
+    xisempty : TXEof;
+    xfirst : TXOpen;
+    xnext : TXOpen;
+    XFindField : TXFieldbyName;
+    XInsert : TXInsert;
+    XUpdate : TXUpdate;
+    XFindRecord : TXFindRecord;
+    XDelete : TXUpdate;
+    XGetActive : TXEof;
+    XSetActive : TXSetActive;
+    XAssignParam : TXAssignParam;
+    XStoredProcExec : TXStoredProcExec;
+    XQuote : TXQuote;
+    XReadMemo : TXReadMemo;
+    XWriteMemo : TXWriteMemo;
+    XReadBlob : TXReadBlob;
+    XWriteBlob : TXWriteBlob;
+    XReadStream : TXReadStream;
+    XWriteStream : TXWriteStream;
+
+    InsFields, FTypes, InsValues, UpdFields, Updatetable , prmFields , prmValues,pTypes :String;
+    updatecondition, Commands : String;
+    Flds, Vals : TStringList;
+    pdoc : ixmldocument;
+    prmNo : integer;
+    gf : TGeneralFunctions;
+    axp_dateparams : String;
+    Transaction: TDBXTransaction;
+
+    Procedure CreateComponents;
+    procedure SetCDS(flag:boolean);
+    function GetSQL : TStringList;
+    function GetSQLText : String;
+    procedure SetSQL(s: TStringList);
+    procedure SetSQLText(s: String);
+    function GetFieldList : TFieldList;
+
+    procedure asetvalue(name, value : String);
+    procedure dsetvalue(name, value : String);
+    procedure apsetvalue(name, value : String);
+    procedure dpsetvalue(name, value : String);
+    procedure asetsql(s:TStringList);
+    procedure dsetsql(s:TStringList);
+    procedure dsetsqltext(s:String);
+    function agetsql : TStringList;
+    function dgetsql : TStringList;
+    function dgetsqltext : String;
+
+    function afieldbyname(s:String):TXfield;
+    function dfieldbyname(s:String):TXfield;
+    procedure aopen;
+    procedure dopen;
+    procedure ropen;
+    procedure copen;
+    procedure aclose;
+    procedure dclose;
+    procedure cclose;
+    procedure rclose;
+    procedure aexecsql;
+    procedure dexecsql;
+    procedure cexecsql;
+    function aeof : boolean;
+    function deof : Boolean;
+    function aisempty : boolean;
+    function disempty : Boolean;
+    procedure afirst;
+    procedure dfirst;
+    procedure anext;
+    procedure dnext;
+    function aparambyname(s:String):TXParam;
+    function dparambyname(s:String):TXParam;
+    function afindfield(s:String):TXfield;
+    function dfindfield(s:String):TXfield;
+    procedure ainsert(table:String);
+    procedure dinsert(table:String);
+    procedure rinsert(table:String);
+    procedure aupdate(table, where:String);
+    procedure dupdate(table, where:String);
+    procedure rupdate(table, where:String);
+    function afindrecord(table, where:String):boolean;
+    function dfindrecord(table, where:String):boolean;
+    function rfindrecord(table, where:String):boolean;
+    procedure adelete(table, where:String);
+    procedure ddelete(table, where:String);
+    procedure rdelete(table, where:String);
+    procedure MakeStr;
+    procedure asetactive(f:boolean);
+    procedure dsetactive(f:boolean);
+    function agetactive:boolean;
+    function dgetactive:boolean;
+    function GetActive: boolean;
+    procedure SetActive(f: boolean);
+    procedure AAssignParam(ParamNo:integer; ParamValue, ParamType:String);
+    procedure DAssignParam(ParamNo:integer; ParamValue, ParamType:String);
+    procedure RAssignParam(ParamNo:integer; ParamValue,ParamType: String);
+    procedure CAssignParam(ParamNo:integer; ParamValue, ParamType:String);
+    function DStoredProcExec(spname,invars,outvars:String) : String ;
+    function AStoredProcExec(spname,invars,outvars:String) : String ;
+    function AQuote(tablename:String):String;
+    function OQuote(tablename:String):String;
+    procedure AReadMemo(fname, filename:String);
+    procedure AReadStream(fname,sname: String ; stm : TStringStream);
+    procedure DReadMemo(fname, filename:String);
+    procedure DReadStream(fname,sname: String ; stm : TStringStream);
+    procedure DReadBlob(fname, filename:String);
+    procedure AWriteMemo(fname, table, where, filename:String);
+    procedure DWriteMemo(fname, table, where, filename:String);
+    procedure DWriteBlob(fname, table, where, filename: String);
+    function DownLoad(filename, tempfile,extn: String): String;
+    procedure ByteArrayToFIle(const ByteArray: TByteDynArray;
+      const FileName: String);
+    function ByteArrayToStream(const ByteArray: TByteDynArray): String;
+    procedure asetsqltext(s: String);
+    function agetsqlText: String;
+    procedure aWriteBlob(fname, table, where, filename: String);
+    procedure aReadBlob(fname, filename: String);
+    procedure AWriteStream(fname, table, where: String; stm: TStringStream;isblob:boolean=false );
+    procedure BWriteStream(fname, table, where: String; stm: TStringStream;isblob:boolean=false );
+    procedure DWriteStream(fname, table, where: String; stm: TStringStream;isblob:boolean=false );
+    procedure cupdate(table, where: String);
+    procedure cinsert(table: String);
+    procedure remoteMakeStr;
+    procedure MakeStrWithValue;
+    procedure Free;
+    procedure AssignCdsParamsToAdoParams;
+    procedure AdoCDSOpen;
+    procedure AssignCdsParamsToDbxParams;
+    procedure DbxCDSOpen;
+    function ChangeSqlForAssingParams(sqlText, p: String): String;
+    function ChangeSqlForAssingParams8909mode(sqlText, p: String): String;
+    function ChangeSqlForAssingParams8907mode(sqlText, p: String): String;
+    procedure CrossDateChecking;
+    procedure SetCommandTimeout;
+    function StreamToByteArray(filename: string): TByteDynArray;
+    procedure pupdate(table, where: String);
+    procedure pinsert(table: String);
+    procedure KillInactiveSession;
+    procedure MakeStrForMYSQL;
+
+  public
+    Connection : pConnection;
+    Provider : TDataSetProvider;
+    Dbx : TSQLQuery;
+    spDbx : TSQLStoredProc;
+    Ado : TADOQuery;
+    spAdo : TADOStoredProc;
+    CDS : TClientDataSet;
+    Tag : Integer;
+    Editing, Inserting : Boolean;
+    BeforePost : TNotifyEvent;
+    ParamNames : TStringList;
+    pnode : ixmlnode;
+    UpdateChanges : TUpdateChanges;
+    CDSName: String;
+
+    constructor create(SName : String; AOwner:TComponent; c:pConnection; gfun : TGeneralFunctions); virtual;
+    destructor destroy; override;
+
+    function fieldbyname(s:String):TXField;
+    function parambyname(s:String):TXParam;
+    procedure open;
+    procedure close;
+    procedure execsql;
+    function eof : boolean;
+    function isempty : boolean;
+    procedure first;
+    procedure next;
+    function findfield(s:String):TXField;
+    procedure insert(table:String);
+    procedure update(table, where:String);
+    procedure Submit(FieldName, FieldValue, DataType: String);
+//    procedure AddValue(FieldName, FieldValue: String);
+    procedure AddOrEdit(table, where: String);
+    function FindRecord(table, where: String): boolean;
+    procedure ClearEdit;
+    procedure Append(table:String);
+    procedure Edit(table, where: String);
+    procedure Post;
+    procedure DeleteRecord(table, where:String);
+    function GetParamNames: TStringList;
+    procedure AssignParam(ParamNo:integer; ParamValue, ParamType:String);
+    function StoredProcExec(spName,invars,outvars:String) : String ;
+    function Quote(TableName:String):String;
+    procedure ReadMemo(fname, filename:String);
+    procedure ReadStream(fname,sname:String ; stm : TStringStream);
+    procedure WriteMemo(fname, table, where, filename:String);
+    procedure ReadBlob(fname, filename:String);
+    procedure WriteBlob(fname, table, where, filename:String);
+    procedure WriteStream(fname, table, where: String; stm: TStringStream;isblob:boolean=false );
+
+    function GetFieldType(fname: String): String;
+    procedure ClearParams;
+    function GetTable: String;
+    function GenerateInsertQuery(TableName: String):String;
+    procedure SetCDSName(Name: String);
+//    function RExecSQL(SQLString: String): String;
+
+    property buffered : boolean read fcds write setcds;
+    property SQL : TStringList read GetSQL write SetSQL;
+    property Fields : TFieldList read GetFieldList;
+    property Active : boolean read GetActive write SetActive;
+    property SqlText : String read GetSqlText write SetSqlText;
+
+  end;
+
+  const ArraySize = 30000;
+
+implementation
+
+{ TXField }
+
+function TXField.GetBool: Boolean;
+begin
+  result := lowercase(value) = 't';
+end;
+
+function TXField.GetDte: TDate;
+begin
+  if value <> '' then
+    Result := StrToDate(Value)
+  else
+    Result := StrToDate(gf.DummyDate);
+end;
+
+function TXField.GetDtm: TDateTime;
+begin
+  if value <> '' then
+    Result := StrToDateTime(Value)
+  else
+    Result := StrToDate(gf.DummyDate);
+end;
+
+function TXField.GetExt: extended;
+begin
+  if Value = '' then Result := 0
+  else Result := StrToFloat(Value);
+end;
+
+function TXField.GetInt: integer;
+begin
+  if Value = '' then Result := 0
+  else Result := StrToInt(Value);
+end;
+
+function TXField.GetStr: String;
+begin
+  Result := Value;
+end;
+
+procedure TXField.SetBool(b: boolean);
+begin
+  if b then value := 't' else value := 'f';
+end;
+
+procedure TXField.SetDte(d: TDate);
+begin
+  Value := DateToStr(d);
+  XSetValue(name, value);
+end;
+
+procedure TXField.SetDtm(d: TDateTime);
+begin
+  Value := gf.ConvertToDBDateTime(Connection.dbtype,d);
+  XSetValue(name, value);
+end;
+
+procedure TXField.SetExt(x: Extended);
+begin
+  Value := FloatToStr(x);
+  XSetValue(name, value);
+end;
+
+procedure TXField.SetInt(i: integer);
+begin
+  Value := IntToStr(i);
+  XSetValue(name, value);
+end;
+
+procedure TXField.SetStr(s: String);
+begin
+  Value := S;
+  XSetValue(name, value);
+end;
+
+{ TXParam }
+
+function TXParam.GetDte: TDate;
+begin
+  if Value = '' then Result := StrToDate(gf.DummyDate)
+  else Result := StrToDate(Value);
+end;
+
+function TXParam.GetDtm: TDateTime;
+begin
+  if Value = '' then Result := StrToDate(gf.DummyDate)
+  else Result := StrToDateTime(Value);
+end;
+
+function TXParam.GetExt: extended;
+begin
+  if Value = '' then Result := 0
+  else Result := StrToFloat(Value);
+end;
+
+function TXParam.GetInt: integer;
+begin
+  if Value = '' then Result := 0
+  else Result := StrToInt(Value);
+end;
+
+function TXParam.GetStr: String;
+begin
+  Result := Value;
+end;
+
+procedure TXParam.SetDte(d: TDate);
+begin
+  Value := DateToStr(d);
+  XSetValue(name, value);
+end;
+
+procedure TXParam.SetDtm(d: TDateTime);
+begin
+  Value := gf.findandreplace(gf.dbdatestring, ':value', gf.ConvertToDbDateTime(connection.dbtype,d));
+  XSetValue(name, value);
+end;
+
+procedure TXParam.SetExt(x: Extended);
+begin
+  Value := FloatToStr(x);
+  XSetValue(name, value);
+end;
+
+procedure TXParam.SetInt(i: integer);
+begin
+  Value := IntToStr(i);
+  XSetValue(name, value);
+end;
+
+procedure TXParam.SetStr(s: String);
+begin
+  Value := S;
+  XSetValue(name, value);
+end;
+
+{TXDS}
+
+constructor TXDS.create(SName:String; AOwner:TComponent; c:pConnection ; gfun : TGeneralFunctions);
+begin
+  inherited create(AOwner);
+  Name := SName;
+  if not assigned(c) then raise exception.Create('Database connection not established. Please varify connection parameters and DB connectivity');
+
+  Connection := C;
+
+  ado := nil;
+  dbx := nil;
+  spdbx := nil;
+  spado := nil;
+  Provider := nil;
+  cds := nil;
+  gf := gfun;
+  xfield := TXField.create;
+  xparam := TXParam.Create;
+  xfield.gf := gf;
+  xfield.Connection := Connection;
+  xparam.gf := gf;
+  xparam.Connection := Connection;
+  InsFields := '';
+  InsValues := '';
+  UpdFields := '';
+  ftypes := '';
+  ptypes := '';
+  commands:='';
+  BeforePost := nil;
+  flds := TStringList.create;
+  vals := TStringList.create;
+  ParamNames := TStringList.create;
+  axp_dateparams := ',';
+  CDSName := '';
+
+  CreateComponents;
+
+  if c.driver = 'ado' then begin
+    xfieldbyname := afieldbyname;
+    xparambyname := aparambyname;
+    xgetsql := agetsql;
+    xsetsql := asetsql;
+    xgetsqltext := agetsqltext;
+    xsetsqltext := asetsqltext;
+    xopen := aopen;
+    xclose := aclose;
+    xfield.XSetValue := asetvalue;
+    xparam.XSetValue := apsetvalue;
+    xexecsql := aexecsql;
+    xeof := aeof;
+    xisempty := aisempty;
+    xfirst := afirst;
+    xnext := anext;
+    xfindfield := afindfield;
+    xinsert := ainsert;
+    xupdate := aupdate;
+    xfindrecord := afindrecord;
+    xdelete := adelete;
+    xgetactive:=agetactive;
+    xsetactive:=asetactive;
+    xassignparam:=aassignparam;
+    xStoredProcExec:=aStoredProcExec;
+    xquote:=aquote;
+    xreadmemo:=areadmemo;
+    xwriteMemo:=awriteMemo;
+    xwriteBlob:=awriteBlob;
+    xreadBlob:=areadBlob;
+    xReadStream:=aReadStream;
+    xWriteStream:=aWriteStream;
+  end else if c.driver = 'dbx' then begin
+    xfieldbyname := dfieldbyname;
+    xparambyname := dparambyname;
+    xgetsql := dgetsql;
+    xsetsql := dsetsql;
+    xgetsqltext := dgetsqltext;
+    xsetsqltext := dsetsqltext;
+    xopen := dopen;
+    xclose := dclose;
+    xfield.XSetValue := dsetvalue;
+    xparam.XSetValue := dpsetvalue;
+    xexecsql := dexecsql;
+    xeof := deof;
+    xisempty := disempty;
+    xfirst := dfirst;
+    xnext := dnext;
+    xfindfield := dfindfield;
+    xinsert := dinsert;
+    xupdate := dupdate;
+    xfindrecord := dfindrecord;
+    xdelete := ddelete;
+    xgetactive:=dgetactive;
+    xsetactive:=dsetactive;
+    xassignparam:=dassignparam;
+    xStoredProcExec:=dStoredProcExec;
+    xquote:=oquote;
+    xreadMemo:=dreadMemo;
+    xreadBlob:=dreadBlob;
+    xwriteMemo:=dwriteMemo;
+    xwriteBlob:=dwriteBlob;
+    xReadStream:=dReadStream;
+    xWriteStream:=dWriteStream;
+  end else if gf.remotelogin then begin
+    pdoc:=loadxmldata('<params/>');
+    pnode:=pdoc.DocumentElement;
+    xopen:=ropen;
+    xclose:=rclose;
+    xassignparam:=rassignparam;
+    xfindrecord:=rfindrecord;
+    xdelete:=rdelete;
+    xupdate:=rupdate;
+    xinsert:=rinsert;
+    xexecsql:=cexecsql;
+  end;
+end;
+
+Procedure TXDS.CreateComponents;
+  var i : integer;
+begin
+  if Connection.Driver = 'dbx' then begin
+    dbx := TSQLQuery.Create(Self);
+    dbx.SQLConnection := Connection.dbx;
+    spDbx := TSQLStoredProc.Create(Self);
+    spDbx.SQLConnection := Connection.dbx;
+  end else if Connection.Driver = 'ado' then begin
+    i:=0;
+    while True do
+    begin
+      try
+       gf.DoDebug.msg('creating adoquery...');
+       ado := TADOQuery.Create(Self);
+       gf.DoDebug.msg('creating adoquery created...');
+       if ado <> nil then break;
+       if i >= 20 then raise Exception.Create('Error in creating ado comp...');
+      except on e:exception do
+      begin
+        gf.dodebug.Msg('error in getting connection...');
+        if assigned(ado) then freeandnil(ado);
+        inc(i);
+      end;
+      end;
+    end;
+    try
+      if Connection.dbtimeout <> 0 then
+      begin
+        gf.DoDebug.msg('connection time out : ' + inttostr(Connection.dbtimeout));
+        ado.CommandTimeout := Connection.dbtimeout; // default time is 30 secs
+        gf.DoDebug.msg('creating adoquery time set...');
+      end;
+    except on e:exception do
+      gf.DoDebug.msg('Time setting error : ' + e.Message);
+    end;
+    ADO.Connection := Connection.ADO;
+    gf.DoDebug.msg('creating adosp...');
+    spAdo := TADOStoredProc.Create(Self);
+    spAdo.Connection := Connection.ado;
+    ado.EnableBCD := false;
+  end;
+end;
+
+procedure TXDS.SetCDS(flag:Boolean);
+begin
+  fcds := flag;
+  if fcds then begin
+    if not assigned(cds) then begin
+      Provider := TDataSetProvider.Create(nil);
+      Provider.name := 'PV__'+Name;
+      Provider.Options := [poAllowCommandText];
+      if Connection.driver = 'dbx' then
+        Provider.DataSet := dbx
+      else if Connection.driver = 'ado' then
+        Provider.DataSet := ADO;
+
+      cds := TClientDataSet.Create(nil);
+      cds.name := 'CDS__'+Name;
+      CDSName := CDS.Name;
+    end;
+
+    if gf.remotelogin then begin
+      xopen:=ropen;
+      xclose:=rclose;
+      xassignparam:=rassignparam;
+      xexecsql:=cexecsql;
+    end else begin
+      cds.SetProvider(Provider);
+      xopen:=copen;
+      xclose:=cclose;
+      xinsert:=cinsert;
+      xupdate:=cupdate;
+      xassignparam:=cassignparam;
+      xexecsql:=cexecsql;
+    end;
+  end;
+end;
+
+destructor TXDS.destroy;
+begin
+  try
+  FreeAndNil(xfield);
+  FreeAndNil(xparam);
+  FreeAndNil(flds);
+  FreeAndNil(vals);
+  FreeAndNil(ParamNames);
+    except on e:exception do
+    begin
+      gf.DoDebug.Msg('fields,params etc free error : ' + e.Message);
+      provider := nil;
+    end;
+  end;
+  try
+  if assigned(provider) then
+  begin
+     Provider.DataSet := nil;
+     FreeAndNil(provider);
+  end;
+    except on e:exception do
+    begin
+      gf.DoDebug.Msg('provider free error : ' + e.Message);
+      provider := nil;
+    end;
+  end;
+  try
+  if assigned(cds) then
+  begin
+     if cds.Active then cds.Active := false;
+     cds.ProviderName := '';
+     cds.Destroy;
+     cds := nil;
+  end;
+    except on e:exception do
+    begin
+      gf.DoDebug.Msg('cds free error : ' + e.Message);
+      cds := nil;
+    end;
+  end;
+  if Connection.Driver = 'dbx' then begin
+    try
+    if assigned(dbx) then
+    begin
+       if dbx.Active then dbx.Active := false;
+       dbx.SQL.Clear;
+       FreeAndNil(dbx);
+    end;
+    if assigned(spDbx) then FreeAndNil(spDbx);
+      except on e:exception do
+      begin
+        gf.DoDebug.Msg('dbx free error : ' + e.Message);
+        dbx := nil;
+      end;
+    end;
+  end else if Connection.Driver = 'ado' then begin
+    if assigned(ado) then
+    begin
+       if assigned(gf) then gf.DoDebug.msg('adoquery disconnect...');
+       ado.Active := false;
+       ado.Close;
+       if assigned(gf) then gf.DoDebug.msg('adoquery sqls clearing...');
+       ado.SQL.Clear;
+       if assigned(gf) then gf.DoDebug.msg('adoquery destroying...');
+       FreeAndNil(ado);
+       if assigned(gf) then gf.DoDebug.msg('adoquery destroyed...');
+    end;
+    if assigned(spAdo) then FreeAndNil(spAdo);
+  end;
+  inherited destroy;
+end;
+
+procedure TXDS.Free;
+begin
+  destroy;
+end;
+
+procedure TXDS.SetSQL(s:TStringList);
+begin
+  xsetsql(s);
+end;
+
+procedure TXDS.SetSQLText(s:String);
+begin
+  xsetsqltext(s);
+end;
+
+function TXDS.GetSQL : TStringList;
+begin
+  result := xgetsql;
+end;
+
+function TXDS.GetSQLText : String;
+begin
+  result := xgetsqltext;
+end;
+
+procedure TXDS.asetsql(s: TStringList);
+begin
+  ado.sql.Text  := s.Text;
+end;
+
+procedure TXDS.dsetsql(s: TStringList);
+begin
+  dbx.sql.text := s.Text;
+end;
+
+function TXDS.agetsql: TStringList;
+begin
+  result := TStringList(ado.sql);
+end;
+
+procedure TXDS.dsetsqltext(s: String);
+begin
+  dbx.sql.Text := s;
+end;
+
+procedure TXDS.asetsqltext(s: String);
+begin
+  ado.sql.Text := s;
+end;
+
+function TXDS.dgetsql: TStringList;
+begin
+  result := TStringList(dbx.sql);
+end;
+
+function TXDS.dgetsqlText: String;
+begin
+  result := dbx.sql.Text;
+end;
+
+function TXDS.agetsqlText: String;
+begin
+  result := ado.sql.Text;
+end;
+
+function TXDS.fieldbyname(s:String):TXField;
+begin
+  xfield.name := s;
+  result := xfieldbyname(s);
+end;
+
+function TXDS.afieldbyname(s:String):TXfield;
+var dateformat:String;
+    temp:TDateTime;
+begin
+  if ado.FieldValues[s] <> Null then
+    xfield.value := ado.fieldvalues[s]
+  else
+    xfield.value := '';
+  Result := XField;
+  xfield.DataType := ado.fieldbyname(s).DataType;
+  xfield.DataSize := ado.fieldbyname(s).DataSize;
+  if xfield.DataType=ftDateTime then begin
+    if xfield.value<>'' then begin
+      dateformat:=gf.ShortDateFormat.shortdateformat;
+      gf.ShortDateFormat.shortdateformat:='mm/dd/yyyy';
+      temp:=strtodatetime(xfield.value);
+      gf.ShortDateFormat.shortdateformat:=dateformat;
+      xfield.value:=datetimetostr(temp);
+    end;
+  end;
+end;
+
+function TXDS.dfieldbyname(s:String):TXfield;
+begin
+  xfield.value:=dbx.FieldByName(s).AsString;
+  {if varisnull(dbx.FieldValues[s]) then xfield.value:=''
+  else xfield.value := dbx.fieldvalues[s];}
+  Result := XField;
+  xfield.DataType := dbx.fieldbyname(s).DataType;
+  xfield.DataSize := dbx.fieldbyname(s).Datasize;
+end;
+
+procedure TXDS.asetvalue(name, value: String);
+begin
+  ado.FieldValues[name] := value;
+end;
+
+procedure TXDS.dsetvalue(name, value: String);
+begin
+  dbx.FieldValues[name] := value;
+end;
+
+function TXDS.parambyname(s:String):TXParam;
+begin
+   xparam.name := s;
+   result := xparambyname(s);
+end;
+
+function TXDS.aparambyname(s:String):TXParam;
+begin
+  if ado.Parameters.ParamValues[s] <> Null then
+    xparam.value := ado.Parameters.ParamValues[s]
+  else
+    xparam.value := '';
+  xparam.DataType := ado.Parameters.FindParam(s).DataType;
+  Result := XParam;
+end;
+
+function TXDS.dparambyname(s:String):TXParam;
+begin
+  xparam.value := dbx.ParamByName(s).AsString;
+  xparam.DataType:=dbx.parambyname(s).DataType;
+  Result := XParam;
+end;
+
+procedure TXDS.apsetvalue(name, value: String);
+begin
+  ado.parameters.ParamByName(name).Value := value;
+end;
+
+procedure TXDS.dpsetvalue(name, value: String);
+begin
+  dbx.ParamByName(name).AsString := value;
+end;
+
+procedure TXDS.aopen;
+begin
+  gf.DoDebug.msg(ado.SQL.Text);
+  gf.sql_query := 'ado query : ' + ado.SQL.Text;
+  SetCommandTimeout;
+  ado.Open;
+end;
+
+procedure TXDS.dopen;
+begin
+  gf.DoDebug.msg(dbx.SQL.Text);
+  if gf.lowercase_tablenames then dbx.SQL.Text := gf.CallChangeTableNametoLowercase(dbx.SQL.Text,' from ');
+  gf.sql_query := 'dbx query : ' + dbx.SQL.Text;
+  if Connection.DbType <> 'postgre' then
+    dbx.Open
+  else begin
+    try
+      gf.DoDebug.msg('uXDS\dopen\ Check intransaction');
+      if connection.dbx.InTransaction then
+      begin
+        gf.DoDebug.msg('uXDS\dopen\ savepoint a');
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      dbx.Open
+    except On E:Exception do
+      begin
+        gf.DoDebug.msg('uXDS\dopen\ Exception '+E.Message);
+        gf.DoDebug.msg('uXDS\dopen\ Check intransaction');
+        if connection.dbx.InTransaction then
+        begin
+          gf.DoDebug.msg('uXDS\dopen\ rollback to a');
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        raise;
+      end;
+    end;
+  end;
+end;
+
+procedure TXDS.ropen ;
+var rxml , xdoc : IXMLDocument;
+    xnode : IXMLNode;
+    xmlstg,sname : String;
+    sfile : String ;
+    ByteArray : TByteDynArray;
+begin
+  rxml := nil;xdoc := nil;
+//  xmlstring := '';
+  xmlstg := '';
+//  s := '';
+  sname := '';
+  ByteArray := nil;
+  rxml := LoadXMLData('<root></root>') ;
+  xnode :=rxml.documentelement;
+  xnode.attributes['axpapp'] := gf.AppName;
+  xnode.attributes['sessionid'] := gf.sessionid;
+  xnode.attributes['url'] := gf.url;
+  xnode.Attributes['trace'] := 'false';
+  xnode.AddChild('sql').NodeValue :=  CDS.CommandText ;
+  if pnode <> nil then xnode.ChildNodes.Add(pnode.CloneNode(True));
+  rxml.SaveToXML(xmlstg);
+  gf.DoDebug.msg('>>Calling web service Getcds');
+  gf.DoDebug.msg(cds.CommandText);
+  gf.DoDebug.msg(xmlstg);
+//  ByteArray := (gf.AESCall as ARS).Getcds(xmlstg) ;
+  if ByteArray <> nil then
+  begin
+    sname := ByteArrayToStream(ByteArray);
+    cds.XMLData := sname;
+  end
+  else begin
+       cds.XMLData := '';
+  end;
+  if fileexists(sfile) then
+    sysutils.deletefile(sfile);
+end;
+
+procedure TXDS.copen;
+  var conn : boolean;
+  s : String;
+begin
+  conn := true;
+  gf.sql_query := 'csd query : ' + cds.CommandText;
+  while conn do
+  begin
+    try
+      gf.DoDebug.msg(cds.CommandText);
+      if (connection.Driver='ado') then
+      begin
+        SetCommandTimeout;
+        AdoCDSOpen;
+      end else if (connection.Driver='dbx') then
+      begin
+        DbxCDSOpen;
+      end else cds.Open;
+      conn := false;
+    except on e:exception do
+      begin
+        gf.sql_query := gf.sql_query + ' $ Error msg : ' + e.Message;
+        gf.DoDebug.msg('CDS Open Error Msg : ' + gf.sql_query);
+        if gf.IsService then
+        begin
+          s := lowercase(e.Message);
+          if (pos('ora-',s) > 0) and ((pos('no new operations',s) > 0) or (pos('string buffer too small',s) > 0)) then
+          begin
+             Dbx.Close;
+             conn := Connection.ReConnectToDatabase;
+             cds.Close;
+             SetCDS(true);
+             gf.ServiceReconnected := true;
+             KillInactiveSession;
+             break;
+          end else
+          begin
+           conn := false ;
+           raise exception.Create(e.Message);
+          end;
+        end else begin
+          s := lowercase(e.Message);
+          gf.DoDebug.msg('CDS Open Error Msg : ' + s);
+          if (gf.ReConnectDB) and ((pos('shared',s) > 0) or (pos('memory',s) > 0) or (pos('pipe',s) > 0) or (pos('catastrophic',s) > 0)
+          or (pos('oracle',s) > 0) or (pos('connect',s) > 0) or (pos('communication',s) > 0) or (pos('link',s) > 0)) then
+          begin
+             conn := Connection.ReConnectToDatabase;
+             cds.Close;
+             SetCDS(true);
+             if (conn) and (gf.RaiseErrOnDBReconnect) then
+             begin
+//               gf.RaiseErrOnDBReconnect := False;
+               conn := False;
+               raise exception.Create('Network issue. Please try again.');
+             end;
+          end else
+          begin
+            conn := false;
+            raise exception.Create(e.Message);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TXDS.AdoCDSOpen;
+//  var TempProvider : TDataSetProvider;
+//  s : String;
+begin
+  ado.Close;
+  ado.SQL.Text := '';
+  ado.SQL.Text := cds.CommandText;
+  AssignCdsParamsToAdoParams;
+  Ado.open;
+  cds.Data := Provider.Data;
+  {
+  TempProvider := TDataSetProvider.Create(nil);
+  TempProvider.DataSet := ado;
+  cds.Data := TempProvider.Data;
+  TempProvider.Free;
+  TempProvider := nil;
+  }
+end;
+
+procedure TXDS.AssignCdsParamsToAdoParams;
+  var i : integer;
+begin
+  try
+    for i := 0 to cds.Params.Count - 1 do
+    begin
+      ado.Parameters[i].DataType := cds.Params[i].Datatype;
+      ado.Parameters.Items[i].Value := cds.params[i].AsString;
+      gf.DoDebug.msg(ado.parameters[i].Name+'='+cds.params[i].AsString);
+    end;
+  except on e:exception do
+    begin
+      if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\AssignCdsParamsToAdoParams - '+e.Message);
+      gf.DoDebug.Msg(e.Message);
+    end;
+  end;
+end;
+
+procedure TXDS.DbxCDSOpen;
+  var  s : String;
+begin
+  dbx.Close;
+  s := cds.CommandText;
+  if gf.lowercase_tablenames then s := gf.CallChangeTableNametoLowercase(s,' from ');
+  dbx.SQL.Text := s;
+  AssignCdsParamsToDbxParams;
+  if Connection.DbType <> 'postgre' then
+    Dbx.open
+  else begin
+    try
+      if connection.dbx.InTransaction then
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      Dbx.open;
+    except On E:Exception do
+      begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        raise;
+      end;
+    end;
+  end;
+  cds.Data := Provider.Data;
+  {
+  TempProvider := TDataSetProvider.Create(nil);
+  TempProvider.DataSet := dbx;
+  cds.Data := TempProvider.Data;
+  TempProvider.Free;
+  TempProvider := nil;
+  }
+end;
+
+procedure TXDS.AssignCdsParamsToDbxParams;
+  var i : integer;
+begin
+  try
+    for i := 0 to cds.Params.Count - 1 do
+    begin
+      dbx.Params[i].DataType := cds.Params[i].Datatype;
+      if gf.GetDataType(dbx.Params[i].DataType) = 'Numeric' then
+        dbx.Params.Items[i].Value := cds.params[i].AsFloat
+      else
+        dbx.Params.Items[i].Value := cds.params[i].AsString;
+      gf.DoDebug.msg(dbx.params[i].Name+'='+cds.params[i].AsString);
+    end;
+  except on e:exception do
+    begin
+      if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\AssignCdsParamsToDbxParams - '+e.Message);
+      gf.DoDebug.Msg(e.Message);
+    end;
+  end;
+end;
+
+function TXDS.DownLoad(filename,tempfile,extn:String):String;
+var tf : File;
+    buf :array[1..ArraySize] of char;
+    i,j:integer;
+    s , header, sname,sfile : String ;
+    ByteArray : TByteDynArray;
+begin
+  sname := gf.startpath+'temp\'+ tempfile ;
+//  ByteArray := (gf.AESCall as ARS).DownloadFile(filename);
+  ByteArrayToFile( ByteArray, sname );
+  tempfile := copy(tempfile,1,pos('.',tempfile)-1);
+  sfile := gf.startpath+'temp\'+ tempfile + extn;
+  if fileexists(sname) then begin
+    with TCompress.Create do begin
+      decompressfile(sname, sfile);
+      destroy;
+    end;
+  end;
+  if fileexists(sname) then sysutils.deletefile(sname);
+  result := sfile;
+end;
+
+function TXDS.ByteArrayToStream( const ByteArray : TByteDynArray) : String ;
+var Count : integer;
+    F : FIle of Byte;
+    pTemp : Pointer;
+    stm,cstm : TStringStream ;
+begin
+  stm := TStringStream.Create('');
+  cstm := TStringStream.Create('');
+  try
+    Count := Length( ByteArray );
+    pTemp := @ByteArray[0];
+    stm.Write(pTemp^, Count);
+    stm.Position := 0;
+    with TCompress.Create do begin
+      cstm := DecompressStream(stm);
+      destroy;
+    end;
+    cstm.Position := 0;
+    result := cstm.DataString ;
+
+    stm.Free;
+    cstm.Free;
+
+  except on e:Exception do
+    begin
+      if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\ByteArrayToStream - '+e.Message);
+      stm.Free;
+      cstm.Free;
+    end;
+  end;
+end;
+
+procedure TXDS.ByteArrayToFIle( const ByteArray : TByteDynArray;
+                            const FileName : String );
+var Count : integer;
+    F : FIle of Byte;
+    pTemp : Pointer;
+begin
+  AssignFile( F, FileName );
+  Rewrite(F);
+  try
+    Count := Length( ByteArray );
+    pTemp := @ByteArray[0];
+    BlockWrite(F, pTemp^, Count );
+
+    CloseFile( F );
+  Except on e:Exception do
+    begin
+      if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\ByteArrayToFIle - '+e.Message);
+      CloseFile( F );
+    end;
+  end;
+end;
+                               
+procedure TXDS.open;
+  var starttime : TDateTime;
+  conn : boolean;
+  s : String;
+begin
+  if gf.SysCrossDate then CrossDateChecking;
+  conn := true;
+  while conn do
+  begin
+    try
+      starttime := now();
+      xopen;
+      gf.sqltimetaken := millisecondsbetween(now(),starttime);
+      gf.dbtimetaken := gf.dbtimetaken + gf.sqltimetaken;
+      gf.DoDebug.msg('Time elapsed = '+inttostr(millisecondsbetween(now(),starttime)));
+      conn := false;
+    except on e:exception do
+      begin
+        gf.DoDebug.msg('uXDS\open\ Exceptio '+e.Message);
+        gf.sql_query := gf.sql_query + ' $ Open Error msg : ' + e.Message;
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\open - '+e.Message);
+        if gf.IsService then
+        begin
+           conn := false;
+           raise exception.Create(e.Message);
+        end else begin
+          s := lowercase(e.Message);
+          gf.DoDebug.msg('XDS Open Error Msg : ' + s);
+          if (gf.ReConnectDB) and ((pos('shared',s) > 0) or (pos('memory',s) > 0) or (pos('pipe',s) > 0) or (pos('catastrophic',s) > 0)
+          or (pos('oracle',s) > 0) or (pos('connect',s) > 0) or (pos('communication',s) > 0) or (pos('link',s) > 0)) then
+             conn := Connection.ReConnectToDatabase
+          else
+          begin
+            conn := false;
+            raise exception.Create(e.Message);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TXDS.CrossDateChecking;
+  var dt1,dt2 : TDate;
+begin
+  if gf.IsService then exit;
+  gf.SysCrossDate := false;
+  dt1 := strtodate(formatdatetime(gf.ShortDateFormat.ShortDateFormat, Connection.ServerDateTime));
+  gf.SysCrossDate := true;
+  dt2 := strtodate(formatdatetime(gf.ShortDateFormat.ShortDateFormat, gf.AppVarsLoadDateTime));
+  if dt1  - dt2 <= 0 then exit;
+  ShowMessage('Logged in Axpert on ' + formatdatetime(gf.ShortDateFormat.ShortDateFormat, gf.AppVarsLoadDateTime)+ '. Needs to login again...');
+  Application.Terminate;
+end;
+
+
+procedure TXDS.aclose;
+begin
+  ado.Close;
+end;
+
+procedure TXDS.close;
+begin
+  xclose;
+  axp_dateparams := ',';
+end;
+
+procedure TXDS.dclose;
+begin
+  dbx.close;
+end;
+
+procedure TXDS.cclose;
+begin
+  if (connection.Driver='ado') then
+     ado.Close
+  else if (connection.Driver='dbx') then
+     dbx.Close;
+  if assigned(cds) then
+    cds.Close;
+  setcds(true);
+end;
+
+procedure TXDS.rclose;
+begin
+end;
+
+procedure TXDS.aexecsql;
+begin
+  gf.DoDebug.msg(ado.sql.text);
+  SetCommandTimeout;
+  ado.ExecSQL;
+  if assigned(UpdateChanges) then UpdateChanges(ado.SQL.Text);
+end;
+
+procedure TXDS.dexecsql;
+var
+  SQL_Text : String;
+begin
+  gf.DoDebug.msg(dbx.SQL.Text);
+  if gf.lowercase_tablenames then
+  begin
+    SQL_Text := lowercase(dbx.SQL.Text);
+    if (AnsiStartsStr('delete ',SQL_Text) or
+       AnsiStartsStr('select ',SQL_Text)) then
+      dbx.SQL.Text := gf.CallChangeTableNametoLowercase(dbx.SQL.Text,' from ')
+    else if AnsiStartsStr('update ',SQL_Text) then
+      dbx.SQL.Text := gf.CallChangeTableNametoLowercase(' '+dbx.SQL.Text,' update ')
+    else if AnsiStartsStr('insert ',SQL_Text) then
+      dbx.SQL.Text := gf.CallChangeTableNametoLowercase(dbx.SQL.Text,' into ')
+    else if (AnsiStartsStr('alter ',SQL_Text) or
+       AnsiStartsStr('create ',SQL_Text) or
+       AnsiStartsStr('drop ',SQL_Text)) then
+      dbx.SQL.Text := gf.CallChangeTableNametoLowercase(dbx.SQL.Text,' table ');
+  end;
+  if Connection.DbType <> 'postgre' then
+    dbx.ExecSQL(false)
+  else begin
+    try
+      gf.DoDebug.msg('uXDS\dexecsql\ Check intransaction');
+      if connection.dbx.InTransaction then
+      begin
+        gf.DoDebug.msg('uXDS\dexecsql\ savepoint a');
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      dbx.ExecSQL(false);
+    except On E:Exception do
+      begin
+        gf.DoDebug.msg('uXDS\dexecsql\ Exception '+E.Message);
+        gf.DoDebug.msg('uXDS\dexecsql\ Check intransaction');
+        if connection.dbx.InTransaction then
+        begin
+          gf.DoDebug.msg('uXDS\dexecsql\ rollback to a');
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        raise;
+      end;
+    end;
+  end;
+  if assigned(UpdateChanges) then UpdateChanges(dbx.SQL.Text);
+end;
+
+procedure TXDS.execsql;
+  var starttime : TDateTime;
+  conn : boolean;
+  s : String;
+begin
+  conn := true;
+  while conn do
+  begin
+    try
+      starttime := now();
+      xexecsql;
+      gf.dbtimetaken := gf.dbtimetaken + millisecondsbetween(now(),starttime);
+      gf.DoDebug.msg('Time elapsed = '+inttostr(millisecondsbetween(now(),starttime)));
+      conn := false;
+    except on e:exception do
+      begin
+        gf.DoDebug.msg('uXDS\execsql\ Exception '+e.Message);
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\execsql - '+e.Message);
+        if gf.IsService then
+        begin
+           conn := false;
+           raise exception.Create(e.Message);
+        end else begin
+          s := lowercase(e.Message);
+          if (gf.ReConnectDB) and ((pos('shared',s) > 0) or (pos('memory',s) > 0) or (pos('pipe',s) > 0) or (pos('catastrophic',s) > 0)
+          or (pos('oracle',s) > 0) or (pos('connect',s) > 0) or (pos('communication',s) > 0) or (pos('link',s) > 0)) then
+          begin
+             conn := Connection.ReConnectToDatabase;
+             if (conn) and (gf.RaiseErrOnDBReconnect) then
+             begin
+               gf.RaiseErrOnDBReconnect := False;
+               conn := False;
+               raise exception.Create('Network issue. Please try again.');
+             end;
+          end
+          else
+          begin
+            conn := false;
+            raise exception.Create(e.Message);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TXDS.cexecsql;
+  var conn : boolean;
+  s : String;
+begin
+  conn := true;
+  while conn do
+  begin
+    try
+      gf.DoDebug.msg(cds.CommandText);
+      if Connection.DbType = 'postgre' then
+      begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      cds.Execute;
+      if assigned(UpdateChanges) then UpdateChanges(cds.CommandText);
+      conn := false;
+    except on e:exception do
+      begin
+        if Connection.DbType = 'postgre' then
+        begin
+          if connection.dbx.InTransaction then
+            dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\cexecsql - '+e.Message);
+        if gf.IsService then
+        begin
+           conn := false;
+           raise exception.Create(e.Message);
+        end else begin
+          s := lowercase(e.Message);
+          if (gf.ReConnectDB) and ((pos('shared',s) > 0) or (pos('memory',s) > 0) or (pos('pipe',s) > 0) or (pos('catastrophic',s) > 0)
+          or (pos('oracle',s) > 0) or (pos('connect',s) > 0) or (pos('communication',s) > 0) or (pos('link',s) > 0)) then
+          begin
+             conn := Connection.ReConnectToDatabase;
+             cds.Close;
+             SetCDS(true);
+             if (conn) and (gf.RaiseErrOnDBReconnect) then
+             begin
+//               gf.RaiseErrOnDBReconnect := False;
+               conn := False;
+               raise exception.Create('Network issue. Please try again.');
+             end;
+          end else
+          begin
+            conn := false;
+            raise exception.Create(e.Message);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+
+function TXDS.aeof: boolean;
+begin
+  result := ado.Eof;
+end;
+
+function TXDS.deof: Boolean;
+begin
+  result := dbx.Eof;
+end;
+
+function TXDS.eof : boolean;
+begin
+  result := xeof;
+end;
+
+function TXDS.aisempty: boolean;
+begin
+  result := ado.IsEmpty;
+end;
+
+function TXDS.disempty: Boolean;
+begin
+  result := dbx.IsEmpty;
+end;
+
+function TXDS.isempty: boolean;
+begin
+  result := xisempty;
+end;
+
+procedure TXDS.afirst;
+begin
+  ado.First;
+end;
+
+procedure TXDS.anext;
+begin
+  ado.Next;
+end;
+
+procedure TXDS.dfirst;
+begin
+  dbx.First;
+end;
+
+procedure TXDS.dnext;
+begin
+  dbx.Next;
+end;
+
+procedure TXDS.first;
+begin
+  xfirst;
+end;
+
+procedure TXDS.next;
+begin
+  xnext;
+end;
+
+function TXDS.afindfield(s: String): TXfield;
+var f:TField;
+begin
+  f := ado.FindField(s);
+  if assigned(f) then result := fieldbyname(s) else result := nil;
+end;
+
+function TXDS.dfindfield(s: String): TXfield;
+var f:TField;
+begin
+  f := dbx.FindField(s);
+  if assigned(f) then result := fieldbyname(s) else result := nil;
+end;
+
+function TXDS.findfield(s: String): TXField;
+begin
+  Result := xfindfield(s)
+end;
+
+procedure TXDS.Submit(FieldName, FieldValue, DataType:String);
+var p:integer;
+begin
+   p := flds.indexof(lowercase(fieldname));
+   datatype:=lowercase(datatype);
+   if (datatype='d') and (fieldvalue<>'') then fieldvalue := gf.ConvertToDBDateTime(connection.DbType,strtodatetime(fieldvalue));
+   if p=-1 then begin
+     flds.add(lowercase(fieldname));
+     vals.add(fieldvalue);
+     FTypes := FTypes + DataType;
+     Commands:=Commands+'r';
+   end else begin
+     vals[p] := fieldvalue;
+     Ftypes[p+1] := DataType[1];
+     commands[p+1]:='r';
+   end;
+end;
+{
+procedure TXDS.AddValue(FieldName, FieldValue:String);
+var p:integer;
+begin
+   p := flds.indexof(lowercase(fieldname));
+   if p=-1 then begin
+     flds.add(lowercase(fieldname));
+     vals.add(fieldvalue);
+     FTypes := FTypes + 'n';
+     Commands:=Commands+'a';
+   end else begin
+     vals[p] := fieldvalue;
+     Ftypes[p+1] := 'n';
+     commands[p+1]:='a';
+   end;
+end;
+}
+
+procedure TXDS.MakeStrWithValue;
+var i:integer;
+    fieldvalue,s : String;
+begin                             
+  InsFields:=''; UpdFields:=''; InsValues:='';
+  for i:=0 to flds.count-1 do begin
+    s := '';
+    if ftypes[i+1] = 'd' then
+    begin
+       if vals[i]='' then s := 'd';
+    end;
+//    ftypes[i+1] := 'c';
+    InsFields := InsFields + flds[i] + ',';
+    if ftypes[i+1] = 'd' then begin
+      if vals[i]='' then fieldvalue:='null' else fieldvalue:=gf.findandreplace(gf.dbdatestring, ':value', vals[i]);
+      InsValues := InsValues + fieldvalue+',';
+      if commands[i+1]='r' then
+        UpdFields := UpdFields + flds[i] + '='+fieldvalue+','
+      else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+    end else if ftypes[i+1] = 'n' then begin
+      if vals[i]='' then fieldvalue:='0' else fieldvalue:=vals[i];
+      if gf.LocDecimalSeparator <> '.' then
+        fieldvalue := gf.FindAndReplace(fieldvalue,gf.LocDecimalSeparator,'.');
+      InsValues := InsValues + fieldvalue+',';
+      if commands[i+1]='r' then
+        UpdFields := UpdFields + flds[i] + '='+fieldvalue+','
+       else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+    end else begin
+      FieldValue := gf.FindAndReplace(vals[i], '''', '''''');
+      if vals[i]='' then Insvalues:=Insvalues+'null,'
+      else InsValues := InsValues +gf.MsSql_Unicode_Char+''''+FieldValue+''',';
+      if s <> 'd' then
+      begin
+        if commands[i+1]='r' then
+          UpdFields := UpdFields + flds[i] + '='+gf.MsSql_Unicode_Char+''''+FieldValue+''','
+        else
+          UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end else begin
+        if vals[i]='' then fieldvalue:='null';
+        if commands[i+1]='r' then
+          UpdFields := UpdFields + flds[i] + '='+gf.MsSql_Unicode_Char+''+FieldValue+','
+        else
+          UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end;
+    end;
+  end;
+end;
+
+//--- changed to use parameterized sqls
+
+procedure TXDS.remoteMakeStr;
+var i:integer;
+    fieldvalue : String;
+begin
+  InsFields:=''; UpdFields:=''; InsValues:='';
+  for i:=0 to flds.count-1 do begin
+    InsFields := InsFields + flds[i] + ',';
+    if ftypes[i+1] = 'd' then begin
+      if vals[i]='' then fieldvalue:='null' else fieldvalue:=vals[i];
+      InsValues := InsValues + fieldvalue+',';
+      if commands[i+1]='r' then
+        UpdFields := UpdFields + flds[i] + '='+fieldvalue+','
+      else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+    end else if ftypes[i+1] = 'n' then begin
+      if vals[i]='' then fieldvalue:='0' else fieldvalue:=vals[i];
+      InsValues := InsValues + fieldvalue+',';
+      if commands[i+1]='r' then
+        UpdFields := UpdFields + flds[i] + '='+fieldvalue+','
+       else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+    end else begin
+      FieldValue := gf.FindAndReplace(vals[i], '''', '''''');
+      if vals[i]='' then Insvalues:=Insvalues+'null,'
+      else InsValues := InsValues + ''''+FieldValue+''',';
+      if commands[i+1]='r' then
+        UpdFields := UpdFields + flds[i] + '='''+FieldValue+''','
+      else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+    end;
+  end;
+end;
+
+
+function TXDS.GenerateInsertQuery(TableName : String):String;
+var i:integer;
+    fieldvalue,s : String;
+begin
+  InsFields:=''; UpdFields:=''; InsValues:='';
+  for i:=0 to flds.count-1 do begin
+    s := '';
+    if ftypes[i+1] = 'd' then
+    begin
+       if vals[i]='' then s := 'd';
+    end;
+//    ftypes[i+1] := 'c';
+    InsFields := InsFields + flds[i] + ',';
+    if ftypes[i+1] = 'd' then begin
+      if vals[i]='' then fieldvalue:='null' else fieldvalue:=gf.findandreplace(gf.dbdatestring, ':value', vals[i]);
+      InsValues := InsValues + fieldvalue+',';
+      if commands[i+1]='r' then
+        UpdFields := UpdFields + flds[i] + '='+fieldvalue+','
+      else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+    end else if ftypes[i+1] = 'n' then begin
+      if vals[i]='' then fieldvalue:='0' else fieldvalue:=vals[i];
+      InsValues := InsValues + fieldvalue+',';
+      if commands[i+1]='r' then
+        UpdFields := UpdFields + flds[i] + '='+fieldvalue+','
+       else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+    end else begin
+      FieldValue := gf.FindAndReplace(vals[i], '''', '''''');
+      if vals[i]='' then Insvalues:=Insvalues+'null,'
+      else InsValues := InsValues +gf.MsSql_Unicode_Char+''''+FieldValue+''',';
+      if s <> 'd' then
+      begin
+        if commands[i+1]='r' then
+          UpdFields := UpdFields + flds[i] + '='+gf.MsSql_Unicode_Char+''''+FieldValue+''','
+        else
+          UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end else begin
+        if vals[i]='' then fieldvalue:='null';
+        if commands[i+1]='r' then
+          UpdFields := UpdFields + flds[i] + '='+gf.MsSql_Unicode_Char+''+FieldValue+','
+        else
+          UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end;
+    end;
+  end;
+  delete(InsFields, length(InsFields), 1);
+  delete(InsValues, length(InsValues), 1);
+  result := 'insert into '+TableName+' ('+InsFields+') values ('+InsValues+');';
+end;
+
+
+procedure TXDS.MakeStr;
+var i:integer;
+    fieldvalue,pval : String;
+begin
+  if gf.remotelogin then
+  begin
+    remoteMakeStr;
+    exit;
+  end;
+  InsFields:=''; UpdFields:=''; prmFields:=''; InsValues:=''; pTypes := '';
+  for i:=0 to flds.count-1 do begin
+    pval := '';
+    if ftypes[i+1] = 'd' then begin
+       ftypes[i+1] := 'c';
+      if vals[i]='' then
+      begin
+         fieldvalue:='null';
+         pval :=  'null' ;
+         if commands[i+1]='r' then
+          UpdFields := UpdFields + flds[i] + '='+pval+','
+        else
+          UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end else
+      begin
+         pval := gf.findandreplace(gf.dbdatestring, quotedstr(':value'), ':'+flds[i]);
+         fieldvalue:=vals[i];
+         prmFields := prmFields + fieldvalue+'~@#~';
+         pTypes := pTypes + ftypes[i+1];
+         if commands[i+1]='r' then
+           UpdFields := UpdFields + flds[i] + '='+pval+','
+         else
+           UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end;
+    end else if ftypes[i+1] = 'n' then begin
+      if vals[i]='' then fieldvalue:='0' else fieldvalue:=vals[i];
+      prmFields := prmFields + fieldvalue+'~@#~';
+      if commands[i+1]='r' then
+         UpdFields := UpdFields + flds[i] + '= :' + flds[i]+','
+       else
+        UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      pTypes := pTypes + ftypes[i+1];
+    end else begin
+      FieldValue := gf.FindAndReplace(vals[i], '''', '''''');
+      if vals[i]='' then
+      begin
+           fieldvalue:='null';
+           pval :=  'null' ;
+           if commands[i+1]='r' then
+            UpdFields := UpdFields + flds[i] + '='+pval+','
+          else
+            UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end else
+      begin
+         pval := ':'+flds[i];
+         fieldvalue:=vals[i];
+         prmFields := prmFields + fieldvalue+'~@#~';
+         pTypes := pTypes + ftypes[i+1];
+         if commands[i+1]='r' then
+           UpdFields := UpdFields + flds[i] + '='+pval+','
+         else
+           UpdFields:=UpdFields + flds[i]+'='+flds[i]+'+'+fieldvalue+',';
+      end;
+    end;
+    InsFields := InsFields + flds[i] + ',';
+    if pval <> '' then
+         Insvalues := Insvalues + pval + ','
+    else Insvalues := Insvalues + ':' + flds[i] + ','  ;
+  end;
+  prmFields := prmFields + '`';
+end;
+
+(*
+Replicated function of MakeStr. This functionality is for MYSQL database.
+Here we have handled reserved word ‘schema’.
+*)
+procedure TXDS.MakeStrForMYSQL;
+var i:integer;
+    fieldvalue,pval : String;
+    sFieldName : String;
+begin
+  if gf.remotelogin then
+  begin
+    remoteMakeStr;
+    exit;
+  end;
+  InsFields:=''; UpdFields:=''; prmFields:=''; InsValues:=''; pTypes := '';
+  for i:=0 to flds.count-1 do begin
+    sFieldName := flds[i];
+    (*
+    schema is a reserved word in MYSQL , to handle that we enclosed the column name with backtick(`).
+    Here we have handled only for schema , when it's required we may need to implement a separate
+    function to check the keywords/reserved words.
+    *)
+    if lowercase(sFieldName) = 'schema' then
+      sFieldName := '`'+sFieldName+'`';
+    pval := '';
+    if ftypes[i+1] = 'd' then begin
+       ftypes[i+1] := 'c';
+      if vals[i]='' then
+      begin
+         fieldvalue:='null';
+         pval :=  'null' ;
+         if commands[i+1]='r' then
+          UpdFields := UpdFields + sFieldName + '='+pval+','
+        else
+          UpdFields:=UpdFields + sFieldName+'='+sFieldName+'+'+fieldvalue+',';
+      end else
+      begin
+         pval := gf.findandreplace(gf.dbdatestring, quotedstr(':value'), ':'+sFieldName);
+         fieldvalue:=vals[i];
+         prmFields := prmFields + fieldvalue+'~@#~';
+         pTypes := pTypes + ftypes[i+1];
+         if commands[i+1]='r' then
+           UpdFields := UpdFields + sFieldName + '='+pval+','
+         else
+           UpdFields:=UpdFields + sFieldName+'='+sFieldName+'+'+fieldvalue+',';
+      end;
+    end else if ftypes[i+1] = 'n' then begin
+      if vals[i]='' then fieldvalue:='0' else fieldvalue:=vals[i];
+      prmFields := prmFields + fieldvalue+'~@#~';
+      if commands[i+1]='r' then
+         UpdFields := UpdFields + sFieldName + '= :' + sFieldName+','
+       else
+        UpdFields:=UpdFields + sFieldName+'='+sFieldName+'+'+fieldvalue+',';
+      pTypes := pTypes + ftypes[i+1];
+    end else begin
+      FieldValue := gf.FindAndReplace(vals[i], '''', '''''');
+      if vals[i]='' then
+      begin
+           fieldvalue:='null';
+           pval :=  'null' ;
+           if commands[i+1]='r' then
+            UpdFields := UpdFields + sFieldName + '='+pval+','
+          else
+            UpdFields:=UpdFields + sFieldName+'='+sFieldName+'+'+fieldvalue+',';
+      end else
+      begin
+         pval := ':'+sFieldName;
+         fieldvalue:=vals[i];
+         prmFields := prmFields + fieldvalue+'~@#~';
+         pTypes := pTypes + ftypes[i+1];
+         if commands[i+1]='r' then
+           UpdFields := UpdFields + sFieldName + '='+pval+','
+         else
+           UpdFields:=UpdFields + sFieldName+'='+sFieldName+'+'+fieldvalue+',';
+      end;
+    end;
+    InsFields := InsFields + sFieldName + ',';
+    if pval <> '' then
+         Insvalues := Insvalues + pval + ','
+    else Insvalues := Insvalues + ':' + sFieldName + ','  ;
+  end;
+  prmFields := prmFields + '`';
+end;
+//---
+
+procedure TXDS.ClearEdit;
+begin
+  FTypes := '';
+  pTypes := '';
+  Flds.clear;
+  Vals.clear;
+  Editing := false;
+  updatetable := '';
+  updatecondition := '';
+  Commands:='';
+  pdoc:=loadxmldata('<params/>');
+end;
+
+procedure TXDS.ainsert(table: String);
+var i:integer;
+begin
+  if Connection.DbType = 'ms sql' then table:='"'+table+'"';
+  i:=1;
+  while true do begin
+    try
+      if assigned(beforepost) then beforepost(self);
+      MakeStrWithValue;
+      if InsFields='' then exit;
+      delete(InsFields, length(InsFields), 1);
+      delete(InsValues, length(InsValues), 1);
+      ado.sql.Text := 'insert into '+table+' ('+InsFields+') values ('+InsValues+')';
+      gf.DoDebug.msg(ado.sql.text);
+      SetCommandTimeout;
+      ado.ExecSQL;
+      break;
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\ainsert - '+e.Message);
+        inc(i);
+        if i=10 then raise;
+        if not assigned(beforepost) then raise;
+      end;
+    end;
+  end;
+  clearedit;
+end;
+
+procedure TXDS.aupdate(table, where: String);
+var i:integer;
+begin
+  if Connection.DbType = 'ms sql' then table:='"'+table+'"';
+  i:=1;
+  while true do begin
+    try
+      if assigned(beforepost) then beforepost(self);
+      MakeStrWithValue;
+      if UpdFields='' then exit;
+      delete(UpdFields, length(UpdFields), 1);
+      ado.sql.Text := 'update '+table+' set '+UpdFields;
+      if where <> '' then
+        ado.sql.Text := ado.SQL.Text+' where '+ where;
+      gf.DoDebug.msg(ado.sql.text);
+      SetCommandTimeout;
+      ado.ExecSQL;
+      break;
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\aupdate - '+e.Message);
+        inc(i);
+        if i=10 then raise;
+        if not assigned(beforepost) then raise;
+      end;
+    end;
+  end;
+  clearedit;
+end;
+
+//--- changed to use parameterized sqls
+{procedure TXDS.ainsert(table: String);
+  var s:String;
+begin
+    table:='"'+table+'"';
+    ado.SQL.Text := 'insert into '+table+' ('+InsFields+') values ('+InsValues+')';
+    prmNo := 1;
+    while true do
+    begin
+      prmValues := gf.GetNthString(prmFields,prmNo,'~');
+      if prmValues = '`' then break;
+      AssignParam(prmNo-1,prmValues,ptypes[prmNo]);
+      prmNo := prmNo + 1;
+    end;
+    gf.DoDebug.msg(ado.SQL.Text);
+    ado.ExecSQL;
+end;
+
+procedure TXDS.aupdate(table, where: String);
+  var s:String;
+begin
+    table:='"'+table+'"';
+    ado.SQL.Text := 'update '+table+' set '+UpdFields;
+    if where <> '' then
+      ado.SQL.Text := ado.SQL.Text + ' where '+ where;
+    prmNo := 1;
+    while true do
+    begin
+      prmValues := gf.GetNthString(prmFields,prmNo,'~');
+      if prmValues = '`' then break;
+      AssignParam(prmNo-1,prmValues,ptypes[prmNo]);
+      prmNo := prmNo + 1;
+    end;
+    gf.DoDebug.msg(ado.SQL.Text);
+    ado.ExecSQL;
+end;
+//----
+}
+procedure TXDS.adelete(table, where: String);
+begin
+  ado.SQL.Text := 'delete from '+table;
+  if where <> '' then
+    ado.SQL.Text := ado.SQL.Text + ' where '+ where;
+  SetCommandTimeout;
+  ado.ExecSQL;
+end;
+
+//--- changed to use parameterized sqls
+procedure TXDS.dinsert(table: String);
+  var s:String;
+begin
+    if gf.lowercase_tablenames then table := LowerCase(table);
+    if Connection.DbType = 'postgre' then
+    begin
+      pinsert(table);
+    end else
+    begin
+      dbx.SQL.Clear;
+      dbx.SQL.Add('insert into '+table+' ('+InsFields+') values ('+InsValues+')');
+      prmNo := 1;
+      while true do
+      begin
+        prmValues := gf.GetNthString(prmFields,prmNo,'~@#~');
+        if prmValues = '`' then break;
+        AssignParam(prmNo-1,prmValues,ptypes[prmNo]);
+        prmNo := prmNo + 1;
+      end;
+      gf.DoDebug.msg(dbx.SQL.Text);
+      dbx.ExecSQL;
+    end;
+end;
+
+procedure TXDS.pinsert(table: String);
+var i:integer;
+begin
+  i:=1;
+  while true do begin
+    try
+      if assigned(beforepost) then beforepost(self);
+      MakeStrWithValue;
+      if InsFields='' then exit;
+      delete(InsFields, length(InsFields), 1);
+      delete(InsValues, length(InsValues), 1);
+      dbx.sql.Text := 'insert into '+table+' ('+InsFields+') values ('+InsValues+')';
+      gf.DoDebug.msg(dbx.sql.text);
+      gf.DoDebug.msg('uXDS\pinsert\ Check intransaction');
+      if connection.dbx.InTransaction then
+      begin
+        gf.DoDebug.msg('uXDS\pinsert\ ExecuteDirect - savepoint a');
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      dbx.ExecSQL;
+      break;
+    except on e:Exception do
+      begin
+        gf.DoDebug.msg('uXDS\pinsert\ Exception : '+E.Message);
+        gf.DoDebug.msg('uXDS\pinsert\ Check intransaction ');
+        if connection.dbx.InTransaction then
+        begin
+          gf.DoDebug.msg('uXDS\pinsert\ ExecuteDirect - rollback to a');
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\ainsert - '+e.Message);
+        inc(i);
+        if i=10 then raise;
+        if not assigned(beforepost) then raise;
+      end;
+    end;
+  end;
+  clearedit;
+end;
+
+procedure TXDS.dupdate(table, where: String);
+  var s:String;
+begin
+    if gf.lowercase_tablenames then table := LowerCase(table);
+    if Connection.DbType = 'postgre' then
+    begin
+      pupdate(table,where);
+    end else
+    begin
+      dbx.SQL.Clear;
+      dbx.SQL.Add('update '+table+' set '+UpdFields);
+      if where <> '' then
+        dbx.SQL.Add(' where '+ where);
+      prmNo := 1;
+      while true do
+      begin
+        prmValues := gf.GetNthString(prmFields,prmNo,'~@#~');
+        if prmValues = '`' then break;
+        AssignParam(prmNo-1,prmValues,ptypes[prmNo]);
+        prmNo := prmNo + 1;
+      end;
+      gf.DoDebug.msg(dbx.sql.text);
+      dbx.ExecSQL;
+    end;
+end;
+
+procedure TXDS.pupdate(table, where: String);
+  var i:integer;
+begin
+  i:=1;
+  while true do begin
+    try
+      if assigned(beforepost) then beforepost(self);
+      MakeStrWithValue;
+      if UpdFields='' then exit;
+      delete(UpdFields, length(UpdFields), 1);
+      dbx.sql.Text := 'update '+table+' set '+UpdFields;
+      if where <> '' then
+        dbx.sql.Text := dbx.SQL.Text+' where '+ where;
+      gf.DoDebug.msg(dbx.sql.text);
+      gf.DoDebug.msg('uXDS\pupdate\ Check intransaction');
+      if connection.dbx.InTransaction then
+      begin
+        gf.DoDebug.msg('uXDS\pupdate\ ExecuteDirect - savepoint a');
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      dbx.ExecSQL;
+      break;
+    except on e:Exception do
+      begin
+        gf.DoDebug.msg('uXDS\pupdate\ Exception '+E.Message);
+        gf.DoDebug.msg('uXDS\pupdate\ Check intransaction');
+        if connection.dbx.InTransaction then
+        begin
+          gf.DoDebug.msg('uXDS\pupdate\ rollback to a');
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\aupdate - '+e.Message);
+        inc(i);
+        if i=10 then raise;
+        if not assigned(beforepost) then raise;
+      end;
+    end;
+  end;
+  clearedit;
+end;
+
+procedure TXDS.cupdate(table, where: String);
+  var conn : boolean;
+  s : String;
+begin
+  conn := true;
+  while conn do
+  begin
+    try
+      cds.CommandText := 'update '+table+' set '+UpdFields;
+      if where <> '' then
+        cds.CommandText := cds.CommandText + ' where '+ where;
+      prmNo := 1;
+      while true do
+      begin
+        prmValues := gf.GetNthString(prmFields,prmNo,'~@#~');
+        if prmValues = '`' then break;
+        AssignParam(prmNo-1,prmValues,ptypes[prmNo]);
+        prmNo := prmNo + 1;
+      end;
+      gf.DoDebug.msg(cds.CommandText);
+      if Connection.DbType = 'postgre' then
+      begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      cds.Execute;
+      conn := false;
+    except on e:exception do
+      begin
+        if Connection.DbType = 'postgre' then
+        begin
+          if connection.dbx.InTransaction then
+            dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\cupdate - '+e.Message);
+        if gf.IsService then
+        begin
+           conn := false;
+           raise exception.Create(e.Message);
+        end else begin
+          s := lowercase(e.Message);
+          if (gf.ReConnectDB) and ((pos('shared',s) > 0) or (pos('memory',s) > 0) or (pos('pipe',s) > 0) or (pos('catastrophic',s) > 0)
+          or (pos('oracle',s) > 0) or (pos('connect',s) > 0) or (pos('communication',s) > 0) or (pos('link',s) > 0)) then
+          begin
+             conn := Connection.ReConnectToDatabase;
+             cds.Close;
+             SetCDS(true);
+             if (conn) and (gf.RaiseErrOnDBReconnect) then
+             begin
+               gf.RaiseErrOnDBReconnect := False;
+               conn := False;
+               raise exception.Create('Network issue. Please try again.');
+             end;
+          end else
+          begin
+            conn := false;
+            raise exception.Create(e.Message);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TXDS.cinsert(table: String);
+  var conn : boolean;
+  s : String;
+begin
+  conn := true;
+  while conn do
+  begin
+    try
+      cds.CommandText := 'insert into '+table+' ('+InsFields+') values ('+InsValues+')';
+      prmNo := 1;
+      while true do
+      begin
+        prmValues := gf.GetNthString(prmFields,prmNo,'~@#~');
+        if prmValues = '`' then break;
+        AssignParam(prmNo-1,prmValues,ptypes[prmNo]);
+        prmNo := prmNo + 1;
+      end;
+      gf.DoDebug.msg(cds.CommandText);
+      if Connection.DbType = 'postgre' then
+      begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      cds.Execute;
+      conn := false;
+    except on e:exception do
+      begin
+        if Connection.DbType = 'postgre' then
+        begin
+          if connection.dbx.InTransaction then
+            dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\cinsert - '+e.Message);
+        if gf.IsService then
+        begin
+           conn := false;
+           raise exception.Create(e.Message);
+        end else begin
+          s := lowercase(e.Message);
+          if (gf.ReConnectDB) and ((pos('shared',s) > 0) or (pos('memory',s) > 0) or (pos('pipe',s) > 0) or (pos('catastrophic',s) > 0)
+          or (pos('oracle',s) > 0) or (pos('connect',s) > 0) or (pos('communication',s) > 0) or (pos('link',s) > 0)) then
+          begin
+             conn := Connection.ReConnectToDatabase;
+             cds.Close;
+             SetCDS(true);
+             if (conn) and (gf.RaiseErrOnDBReconnect) then
+             begin
+               gf.RaiseErrOnDBReconnect := False;
+               conn := False;
+               raise exception.Create('Network issue. Please try again.');
+             end;
+          end else
+          begin
+            conn := false;
+            raise exception.Create(e.Message);
+          end;
+        end;
+      end;
+    end;
+  end;
+end;
+//----
+procedure TXDS.rinsert(table: String);
+var s:String;
+begin
+  s := 'insert into '+table+' ('+InsFields+') values ('+InsValues+')';
+  gf.DoDebug.msg(s);
+//  s:=RexecSQL(s);
+  if s<>'' then raise exception.create(s);
+end;
+
+procedure TXDS.rupdate(table, where: String);
+var s:String;
+begin
+  s := 'update '+table+' set '+UpdFields;
+  if where <> '' then
+    s := s + ' where '+ where;
+  gf.DoDebug.msg(s);
+//  s:=RExecSQL(s);
+  if s<>'' then exception.create(s);
+end;
+
+procedure TXDS.insert(table: String);
+  var  starttime:TDateTime;
+begin
+  if Connection.driver <> 'ado' then
+  begin
+    if Connection.DbType <> 'postgre' then
+    begin
+      if assigned(beforepost) then beforepost(self);
+      if Connection.DbType = 'mysql' then
+        MakeStrForMYSQL
+      else
+        MakeStr;
+      if InsFields='' then exit;
+    end;
+  end;
+  delete(InsFields, length(InsFields), 1);
+  delete(InsValues, length(InsValues), 1);
+  starttime:=now();
+  xinsert(table);
+  gf.dbtimetaken := gf.dbtimetaken + millisecondsbetween(now(),starttime);
+  ClearEdit;
+end;
+
+procedure TXDS.ddelete(table, where: String);
+begin
+  if gf.lowercase_tablenames then table := LowerCase(table);
+  dbx.SQL.Text := 'delete from '+table;
+  if where <> '' then
+    dbx.SQL.Text := dbx.SQL.Text + ' where '+ where;
+  if Connection.DbType <> 'postgre' then
+    dbx.ExecSQL
+  else begin
+    try
+      gf.DoDebug.msg('uXDS\ddelete\ Check intransaction');
+      if connection.dbx.InTransaction then
+      begin
+        gf.DoDebug.msg('uXDS\ddelete\ savepoint a');
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      end;
+      dbx.ExecSQL
+    except On E:Exception do
+      begin
+        gf.DoDebug.msg('uXDS\ddelete\ Exception '+E.Message);
+        gf.DoDebug.msg('uXDS\ddelete\ Check intransaction');
+        if connection.dbx.InTransaction then
+        begin
+          gf.DoDebug.msg('uXDS\ddelete\ rollback to a');
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        end;
+        raise;
+      end;
+    end;
+  end;
+end;
+
+procedure TXDS.rdelete(table, where: String);
+var s:String;
+begin
+  s := 'delete from '+table;
+  if where <> '' then
+    s := s + ' where '+ where;
+//  s:=RExecSQL(s);
+  if s<>'' then raise exception.create(s);
+end;
+{
+function TXDS.RExecSQL(SQLString:String):String;
+var rxml : IXMLDocument;
+    xnode:IXMLNode;
+    xmlstg, s,msg : String;
+    i : integer;
+begin
+  rxml := LoadXMLData('<root></root>') ;
+  xnode :=rxml.documentelement;
+  xnode.attributes['axpapp'] := gf.AppName;
+  xnode.attributes['sessionid'] := gf.sessionid;
+  if gf.DoDebug.Active then
+    xnode.Attributes['trace'] := 'true'
+  else
+    xnode.Attributes['trace'] := 'false';
+  xnode.AddChild('sqltext').NodeValue := sqlstring;
+  xnode.AddChild('paramvalues').NodeValue := '';
+  xnode.AddChild('paramtypes').NodeValue := '';
+  xnode.AddChild('withdata').NodeValue := 'false';
+  rxml.saveToXML(xmlstg);
+  gf.DoDebug.msg('Calling web service Execsql '+xmlstg);
+  s := ( gf.AESCall as ARS).ExecSQL(xmlStg) ;
+  if copy(s,1,7) = '<error>' then
+  begin
+    delete(s,1,7);
+    msg := copy(s,1,pos('<',s)-1);
+    delete(s,1,pos('>',s)+1);
+    if gf.DoDebug.Active then
+    begin
+      showmessage(msg);
+      with Tstringlist.Create do
+      begin
+        text := s;
+        for i := 0 to count - 1 do
+            gf.DoDebug.Msg(strings[i]);
+        free;
+      end;
+    end else  Showmessage(s);
+    exit ;
+  end else result := '';
+  rxml := nil;
+end;
+}
+procedure TXDS.update(table, where: String);
+  var  starttime:TDateTime;
+begin
+  if Connection.driver <> 'ado' then
+  begin
+    if Connection.DbType <> 'postgre' then
+    begin
+      if assigned(beforepost) then beforepost(self);
+      if Connection.DbType = 'mysql' then
+        MakeStrForMYSQL
+      else
+        MakeStr;
+      if UpdFields='' then exit;
+    end;
+  end;
+  delete(UpdFields, length(UpdFields), 1);
+  starttime:=now();
+  xupdate(table, where);
+  gf.dbtimetaken := gf.dbtimetaken + millisecondsbetween(now(),starttime);
+  ClearEdit;
+end;
+
+function TXDS.afindrecord(table, where: String): boolean;
+begin
+  ado.sql.text := 'select * from '+table+' where '+where;
+  gf.DoDebug.msg(ado.sql.text);
+  ado.open;
+  result := not ado.IsEmpty;
+  ado.Close;
+  ado.SQL.clear;
+end;
+
+function TXDS.dfindrecord(table, where: String): boolean;
+begin
+  if gf.lowercase_tablenames then table := LowerCase(table);
+  dbx.sql.text := 'select * from '+table+' where '+where;
+  gf.DoDebug.msg(dbx.SQL.text);
+  if Connection.DbType <> 'postgre' then
+    dbx.open
+  else begin
+    try
+      if connection.dbx.InTransaction then
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      dbx.open;
+    except On E:Exception do
+      begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        raise;
+      end;
+    end;
+  end;
+  result := not dbx.IsEmpty;
+  dbx.Close;
+  dbx.SQL.clear;
+end;
+
+function TXDS.rfindrecord(table, where: String): boolean;
+var rxml , xdoc : IXMLDocument;
+    xnode : IXMLNode;
+    xmlstg,s,sname,xmlstring : String;
+    ByteArray : TByteDynArray;
+begin
+  result:=false;
+  s:='select * from '+table+' where '+where;
+  rxml := LoadXMLData('<root></root>') ;
+  xnode :=rxml.documentelement;
+  xnode.attributes['axpapp'] := gf.AppName;
+  xnode.attributes['sessionid'] := gf.sessionid;
+  xnode.attributes['url'] := gf.url;
+  xnode.Attributes['trace'] := 'false';
+  xnode.AddChild('sql').NodeValue :=  CDS.CommandText ;
+  rxml.SaveToXML(xmlstg);
+  gf.DoDebug.msg('>>Calling web service Getcds');
+  gf.DoDebug.msg(cds.CommandText);
+//  ByteArray := (gf.AESCall as ARS).Getcds(xmlstg) ;
+  if ByteArray <> nil then
+  begin
+    sname := ByteArrayToStream(ByteArray);
+    cds.XMLData := sname;
+    result:=cds.RecordCount>0;
+  end
+  else begin
+    if lowercase(copy(trim(cds.CommandText),1,6)) = 'select' then
+       raise exception.Create('Table not exists....')
+    else
+       cds.XMLData := '';
+  end;
+end;
+
+function TXDS.FindRecord(table, where:String):boolean;
+begin
+  if connection.DbType='access' then table:='"'+table+'"';
+  result := xFindRecord(table, where);
+end;
+
+procedure TXDS.AddOrEdit(table, where : String);
+begin
+  if not findrecord(table, where) then
+    insert(table)
+  else
+    update(table, where);
+end;
+
+procedure TXDS.Edit(table, where : String);
+begin
+  ClearEdit;
+  Editing := true;
+  Inserting := false;
+  updatetable := table;
+  updatecondition := where;
+end;
+
+procedure TXDS.Append(table:String);
+begin
+  ClearEdit;
+  Editing := false;
+  Inserting := true;
+  updatetable := table;
+end;
+
+procedure TXDS.Post;
+begin
+  if editing then update(updatetable, updatecondition)
+  else if inserting then insert(updatetable);
+  clearedit;
+end;
+
+procedure TXDS.DeleteRecord(table, where:String);
+var i:integer;
+    starttime:TDateTime;
+begin
+  if connection.DbType='access' then begin
+    if connection.DbType='access' then table:='"'+table+'"';
+    while true do begin
+      try
+        xdelete(table, where);
+        break;
+      except on e:Exception do
+        begin
+          if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\DeleteRecord - '+e.Message);
+          inc(i);
+          if i=100 then raise;
+        end;
+      end;
+    end;
+  end else begin
+    starttime:=now();
+    xdelete(table, where);
+    gf.dbtimetaken := gf.dbtimetaken + millisecondsbetween(now(),starttime);
+  end;
+end;
+
+function TXDS.GetFieldList: TFieldList;
+begin
+  if connection.driver='ado' then
+    result := ado.FieldList
+  else if connection.driver='dbx' then
+    result := dbx.FieldList;
+end;
+
+function TXDS.GetParamNames:TStringList;
+var i:integer;
+begin
+  result := ParamNames;
+  result.clear;
+  if connection.driver='ado' then begin
+    for i:=0 to ado.Parameters.Count-1 do
+      result.add(ado.Parameters[i].Name);
+  end else if connection.driver='dbx' then begin
+    for i:=0 to dbx.Params.Count-1 do
+      result.add(dbx.Params[i].Name);
+  end;
+end;
+
+procedure TXDS.AssignParam(ParamNo:integer; ParamValue, ParamType:String);
+begin
+  XAssignParam(ParamNo, ParamValue, ParamType);
+end;
+
+procedure TXDS.CAssignParam(ParamNo: integer; ParamValue,ParamType: String);
+var paramivalue : extended;
+    paramdvalue : Tdatetime;
+    s,s1 :String;
+begin
+  paramtype:=lowercase(paramtype);
+  if (paramtype='n') then begin
+    if paramvalue='' then paramvalue:='0';
+    try
+    paramivalue := StrToFloat(Paramvalue);
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\CAssignParam - '+e.Message);
+        paramivalue := 0;
+      end;
+    end;
+    s:=FloatToStr(ParamIValue);
+    if (not cds.params[paramno].Bound) or ((cds.params[paramno].Bound) and (cds.Params[paramno].AsString <> s)) then begin
+      if (connection.Driver='ado') then
+      begin
+        cds.Params[paramno].Datatype := ftFloat;
+        cds.Params[paramno].AsFloat := paramivalue;
+      end
+      else
+      begin
+        if Connection.dbtype = 'postgre' then
+        begin
+          cds.Params[paramno].Datatype := ftFloat;
+          cds.Params[paramno].AsFloat := paramivalue;
+        end else
+          cds.Params[paramno].asstring:=s;
+      end;
+      gf.DoDebug.msg(cds.Params[paramno].Name+'='+cds.params[paramno].AsString);
+      cds.Close;
+      cds.SetProvider(Provider);
+    end;
+  end Else if paramtype='d' then begin
+    try
+    ParamDvalue := StrToDateTime(ParamValue);
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\CAssignParam - '+e.Message);
+//        ParamDValue := StrToDateTime(gf.DummyDate);
+        ParamDValue := VarToDateTime(gf.DummyDate);
+      end;
+    end;
+    s := cds.CommandText;
+    s1 := cds.Params[paramno].Name;
+    cds.CommandText := ChangeSqlForAssingParams(s,s1) ;
+    if axp_dateparams = 'axp_olddateformat' then
+       s:=FormatDateTime(gf.DbDateFormat, ParamDValue)
+    else s := gf.ConvertToDbDateTime(connection.dbtype,ParamDValue);
+    if (not cds.params[paramno].Bound) or ((cds.params[paramno].Bound) and (cds.Params[paramno].AsString <> s)) then begin
+      cds.Params[paramno].asstring:=s;
+      gf.DoDebug.msg(cds.Params[paramno].Name+'='+cds.params[paramno].AsString);
+      cds.Close;
+      cds.SetProvider(Provider);
+    end;
+  end Else begin
+    if (not cds.params[paramno].Bound) or ((cds.params[paramno].Bound) and (cds.Params[paramno].AsString <> paramvalue)) then begin
+      cds.Params[paramno].asstring := ParamValue;
+      gf.DoDebug.msg(cds.Params[paramno].Name+'='+cds.params[paramno].AsString);
+      cds.close;
+      cds.SetProvider(Provider);
+    end;
+  end;
+end;
+
+procedure TXDS.RAssignParam(ParamNo:integer; ParamValue, ParamType:String);
+var paramivalue, pnvalue : extended;
+    paramdvalue, pdvalue : Tdatetime;
+    n:ixmlnode;
+begin
+  paramtype:=lowercase(paramtype);
+  if (paramtype='n') then begin
+    if paramvalue='' then paramvalue:='0';
+    try
+    paramivalue := StrToFloat(Paramvalue);
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\RAssignParam - '+e.Message);
+        paramivalue := 0;
+      end;
+    end;
+//    if paramno < pnode.ChildNodes.Count then begin
+    n:=pnode.childnodes.findnode('p'+inttostr(paramno));
+    if assigned(n) then begin
+      if gf.strtofloatz(vartostr(n.nodevalue)) <> paramivalue then cds.close;
+      n.NodeValue:=floattostr(paramivalue);
+      gf.DoDebug.msg(n.nodename+'='+floattostr(paramivalue));
+    end else begin
+      n:= pnode.AddChild('p'+inttostr(Paramno));
+      n.Nodevalue:=floattostr(paramivalue);
+      gf.DoDebug.msg(n.nodename+'='+floattostr(paramivalue));
+    end;
+    n.Attributes['type']:='n';
+  end Else if paramtype='d' then begin
+    try
+    ParamDvalue := StrToDateTime(ParamValue);
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\RAssignParam - '+e.Message);
+        ParamDValue := StrToDateTime(gf.DummyDate);
+      end;
+    end;
+    n:=pnode.childnodes.findnode('p'+inttostr(paramno));
+    if assigned(n) then begin
+      n.NodeValue:=datetimetostr(paramdvalue);
+    end else begin
+      n:= pnode.AddChild('p'+inttostr(Paramno));
+      n.NodeValue:=datetimetostr(paramdvalue);
+    end;
+    n.Attributes['type']:='d';
+  end Else begin
+    n:=pnode.childnodes.findnode('p'+inttostr(paramno));
+    if assigned(n) then begin
+      if vartostr(n.nodevalue) <> paramvalue then cds.close;
+      n.NodeValue:=paramvalue;
+      gf.DoDebug.msg(n.nodename+'='+paramvalue);
+    end else begin
+      n:= pnode.AddChild('p'+inttostr(Paramno));
+      n.Nodevalue:=paramvalue;
+      gf.DoDebug.msg(n.nodename+'='+paramvalue);
+    end;
+    n.Attributes['type']:='c';
+  end;
+end;
+
+procedure TXDS.AAssignParam(ParamNo:integer; ParamValue, ParamType : String);
+  var  paramdvalue : Tdatetime;
+  s,s1 : String;
+begin
+  try
+    if ado.Parameters[paramno].Value <> ParamValue Then Begin
+      if paramtype='d' then begin
+        try
+          ParamDvalue := StrToDateTime(ParamValue);
+        except on e:Exception do
+          begin
+            if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\AAssignParam - '+e.Message);
+            ParamDValue := StrToDateTime(gf.DummyDate);
+          end;
+        end;
+        s := ado.SQL.Text;
+        s1 := ado.parameters[paramno].Name;
+        ado.SQL.Text := ChangeSqlForAssingParams(s,s1) ;
+        if axp_dateparams = 'axp_olddateformat' then
+           ParamValue:=FormatDateTime(gf.DbDateFormat, ParamDValue)
+        else ParamValue := gf.ConvertToDbDateTime(connection.dbtype,ParamDValue);
+      end;
+      if ado.Parameters[paramno].DataType = ftDateTime then ado.Parameters[paramno].DataType := ftString;
+      ado.Parameters.Items[paramno].Value := ParamValue;
+      gf.DoDebug.msg(ado.parameters[paramno].Name+'='+paramvalue);
+      ado.Close;
+    end;
+  except on e:exception do
+    begin
+       if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\AAssignParam - '+e.Message);
+      gf.DoDebug.Msg(e.Message);
+    end;
+  end;
+end;
+
+procedure TXDS.DAssignParam(ParamNo:integer; ParamValue, ParamType:String);
+var paramivalue : extended;
+    paramdvalue : Tdatetime;
+    s,s1 : String;
+begin
+  paramtype:=lowercase(paramtype);
+  gf.DoDebug.msg('Param Type = '+ paramtype);
+  if (paramtype='n') then begin
+    if paramvalue='' then paramvalue:='0';
+    try
+    paramivalue := StrToFloat(Paramvalue);
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\DAssignParam - '+e.Message);
+        paramivalue := 0;
+      end;
+    end;
+    if (not dbx.Params[paramno].Bound) or (dbx.Params[paramno].AsFloat <> ParamIValue) Then Begin
+//      dbx.Params[paramno].AsString := FloatToStr(ParamIValue);
+        dbx.Params[paramno].Datatype := ftFloat;
+        dbx.Params[paramno].AsFloat := paramivalue;
+      gf.DoDebug.msg(dbx.Params[paramno].Name+'='+dbx.params[paramno].asstring);
+      dbx.Close;
+    End;
+  end Else if paramtype='d' then begin
+    try
+    ParamDvalue := StrToDateTime(ParamValue);
+    except on e:Exception do
+      begin
+        if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\DAssignParam - '+e.Message);
+        ParamDValue := StrToDateTime(gf.DummyDate);
+      end;
+    end;
+    s := dbx.SQL.Text;
+    s1 := dbx.Params[paramno].Name;
+    dbx.SQL.Text := ChangeSqlForAssingParams(s,s1) ;
+    if dbx.Params[paramno].DataType <> ftDateTime then
+     dbx.Params[paramno].DataType:=ftDateTime;
+    if (not dbx.Params[paramno].IsNull) or (dbx.Params[paramno].AsDateTime <> ParamDValue) then begin
+      if axp_dateparams = 'axp_olddateformat' then
+         dbx.Params[paramno].asstring:=FormatDateTime(gf.DbDateFormat, ParamDValue)
+      else dbx.Params[paramno].asstring := gf.ConvertToDbDateTime(connection.dbtype,ParamDValue);
+      gf.DoDebug.msg(dbx.Params[paramno].Name+'='+dbx.params[paramno].asstring);
+      dbx.Close;
+    end;
+  end Else begin
+    if dbx.Params[paramno].asstring <> paramvalue then begin
+     dbx.Params[paramno].asstring := ParamValue;
+     gf.DoDebug.msg(dbx.Params[paramno].Name+'='+dbx.params[paramno].asstring);
+     dbx.close;
+    end;
+  end;
+end;
+
+function TXDS.ChangeSqlForAssingParams(sqlText,p : String) : String;
+begin
+   if gf.datemode = '8909mode' then
+   begin
+      result := ChangeSqlForAssingParams8909mode(sqlText,p)
+   end else
+   begin
+      result := ChangeSqlForAssingParams8907mode(sqlText,p)
+   end;
+end;
+
+function TXDS.ChangeSqlForAssingParams8909mode(sqlText,p : String) : String;
+   var i,j,k,l,m,k1 : integer;
+   s,dbstring_startwith,format_for_replace,tmpsql,spl_char : String;
+begin
+     result := sqlText;
+     if axp_dateparams = 'axp_olddateformat' then exit;
+     p := ':' + lowercase(p);
+     if pos(','+p+',',axp_dateparams) > 0 then exit;
+     dbstring_startwith := trim(lowercase(copy(gf.dbdatestring,1,pos('(',gf.dbdatestring)-1)));
+
+     //to introduce backword compatibility. If date formats already used in SQLs, then SQLs will not be altered.
+     //Instead dbdateformat will be used to format param values
+     if (axp_dateparams = ',') and (pos(dbstring_startwith,lowercase(sqltext)) > 0) then
+     begin
+        axp_dateparams := 'axp_olddateformat';
+        exit;
+     end;
+     //-----
+     format_for_replace := trim(gf.findandreplace(gf.dbdatestring, quotedstr(':value'), p));
+     if axp_dateparams = ',' then
+     begin
+        sqlText := gf.FindAndReplace(sqltext,#$D#$A,' ');
+        sqlText := gf.FindAndReplace(sqltext,#$A,' ');
+        sqlText := gf.RemoveExtraSpaces(sqltext);
+     end;
+     l := length(sqltext);
+     i := length(dbstring_startwith);
+     k := length(p);
+     k1 := length(format_for_replace) - k;
+     j := pos(p,lowercase(sqlText));
+     while True do
+     begin
+        tmpsql := sqltext;
+        tmpsql := copy(tmpsql,j,l);
+        s := copy(tmpsql,1,length(p));
+        spl_char := copy(tmpsql,length(p)+1,1);
+        if (pos(spl_char,',) ') > 0) or (spl_char = '') then
+        begin
+          s := lowercase(trim(s));
+          if p = s then
+          begin
+            delete(sqltext,j,k);
+            System.insert(format_for_replace,sqltext,j);
+          end;
+        end;
+        tmpsql := copy(sqltext,j+k+k1,l);
+        if pos(p,lowercase(tmpsql)) = 0 then break;
+        j := pos(p,lowercase(tmpsql)) + j +k + k1 - 1;
+     end;
+     axp_dateparams := axp_dateparams + p + ',';
+     result := sqlText;
+end;
+
+function TXDS.ChangeSqlForAssingParams8907mode(sqlText,p : String) : String;
+   var i,j : integer;
+   s,s1,s2 : String;
+begin
+   s := lowercase(copy(gf.dbdatestring,1,pos(quotedstr(':value'),gf.dbdatestring)-1));
+   i := length(s);
+   j := pos(':'+lowercase(p),lowercase(sqlText));
+   s1 := copy(lowercase(sqlText),j-i,i);
+   s2 := gf.findandreplace(gf.dbdatestring, quotedstr(':value'), ':'+p);
+   if s <> s1 then sqlText := gf.findandreplace(sqlText,':'+p,s2);
+   result := sqlText;
+end;
+
+function TXDS.agetactive: boolean;
+begin
+  result:=ado.Active;
+end;
+
+procedure TXDS.asetactive(f: boolean);
+begin
+  ado.Active:=f;
+end;
+
+function TXDS.dgetactive: boolean;
+begin
+  result:=dbx.Active;
+end;
+
+procedure TXDS.dsetactive(f: boolean);
+begin
+  if Connection.DbType <> 'postgre' then
+    dbx.Active:=f
+  else begin
+    try
+      if connection.dbx.InTransaction then
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      dbx.Active := f;
+    except On E:Exception do
+      begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        raise;
+      end;
+    end;
+  end;
+end;
+
+function TXDS.GetActive: boolean;
+begin
+  result:=xgetactive;
+end;
+
+procedure TXDS.SetActive(f: boolean);
+begin
+  xsetactive(f);
+end;
+
+function TXDS.AQuote(tablename: String): String;
+begin
+  result:=quotedstr(tablename);
+end;
+
+function TXDS.OQuote(tablename: String): String;
+begin
+  result:=tablename;
+end;
+
+function TXDS.Quote(TableName: String): String;
+begin
+  result:=xquote(tablename);
+end;
+
+
+procedure TXDS.AReadMemo(fname, filename: String);
+begin
+  if Connection.DbType = 'ms sql' then
+    TMemoField(ado.FieldByName(fname)).SaveToFile(FileName)
+  else begin
+    with tstringlist.create do begin
+      Clear;
+      LineBreak := '';
+      (*
+      Trimming may alter the actual content, especially when memo or
+      blob fields are split and saved as multiple rows.
+      This trimming can lead to issues when merging the content.
+      *)
+      //text := trim(ado.FieldByName(fname).Value);
+      text := ado.FieldByName(fname).Value;
+      SaveToFile(FileName);
+      Free;
+    end;
+  end;
+end;
+
+procedure TXDS.AReadStream(fname,sname: String ; stm : TStringStream);
+  var ByteArray : TByteDynArray;
+  Count : integer;
+  pTemp : Pointer;
+begin
+  if Connection.DbType = 'ms sql' then
+     TMemoField(ado.FieldByName(fname)).SaveToStream(stm)
+  else
+  begin
+    if sname = 'tstructs' then
+    begin
+      ByteArray := ado.FieldByName(fname).Value;
+      Count := Length( ByteArray );
+      pTemp := @ByteArray[0];
+      stm.Write(pTemp^, Count);
+      stm.Position := 0;    
+    end else
+    begin
+      with tstringlist.create do begin
+        Clear;
+        LineBreak := '';
+        (*
+        Trimming may alter the actual content, especially when memo or
+        blob fields are split and saved as multiple rows.
+        This trimming can lead to issues when merging the content.
+        *)
+        //text := trim(ado.FieldByName(fname).Value);
+        text := ado.FieldByName(fname).Value;
+        SaveToStream(stm);
+        Free;
+      end;
+    end;
+  end;
+end;
+
+procedure TXDS.AWriteMemo(fname, table, where, filename: String);
+var
+  csql : String;
+begin
+  csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+  gf.DoDebug.msg(csql);
+  ado.SQL.Text := csql;
+  ado.Parameters.Items[0].LoadFromFile(filename, ftMemo);
+  ado.ExecSQL;
+end;
+
+procedure TXDS.AWriteStream(fname, table, where: String;stm : TStringStream;isblob:boolean);
+var
+  csql : String;
+begin
+  if IsBlob then
+  begin
+    csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+    gf.DoDebug.msg(csql);
+    ado.SQL.Text := csql;
+    ado.Parameters.Items[0].LoadFromStream(stm,ftBlob);
+    ado.ExecSQL;
+  end else
+  begin
+    csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+    gf.DoDebug.msg(csql);
+    ado.SQL.Text := csql;
+    ado.Parameters.Items[0].LoadFromStream(stm,ftMemo);
+    ado.ExecSQL;
+  end;
+end;
+
+procedure TXDS.BWriteStream(fname, table, where: String;stm : TStringStream;isblob:boolean);
+begin
+end;
+
+procedure TXDS.DReadMemo(fname, filename: String);
+begin
+  with tstringlist.create do begin
+    Clear;
+    LineBreak := '';
+    (*
+    Trimming may alter the actual content, especially when memo or
+    blob fields are split and saved as multiple rows.
+    This trimming can lead to issues when merging the content.
+    *)
+    //text := trim(dbx.FieldByName(fname).Value);
+    text := dbx.FieldByName(fname).Value;
+    SaveToFile(FileName,TEncoding.UTF8);
+    Free;
+  end;
+end;
+
+procedure TXDS.DReadStream(fname,sname: String ; stm : TStringStream);
+begin
+  if (sname = 'tstructs') or (sname = 'axpertreports') then
+     TBlobField(dbx.FieldByName(fname)).SaveToStream(stm)
+  else
+    (*
+    Trimming may alter the actual content, especially when memo or
+    blob fields are split and saved as multiple rows.
+    This trimming can lead to issues when merging the content.
+    *)
+     //stm.WriteString(trim(dbx.FieldByName(fname).Value));
+     stm.WriteString(dbx.FieldByName(fname).Value);
+end;
+
+procedure TXDS.DWriteMemo(fname, table, where, filename: String);
+var
+  csql : String;
+  myParams : TParams;
+  mm : Tstringlist;
+  s : string;
+begin
+  if gf.lowercase_tablenames then table := LowerCase(table);
+  csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+  myParams := TParams.Create;
+  mm := Tstringlist.Create;
+  mm.Clear;
+  mm.LineBreak := '';
+  myParams.Clear;
+  myParams.CreateParam(ftBlob, 'MemoParam', ptInput);
+  mm.LoadFromFile(filename,TEncoding.UTF8);
+  s := trim(mm.Text);
+  myparams.ParamByName('MemoParam').AsWideString :=  s; //  .LoadFromFile(filename, ftBlob);
+  gf.DoDebug.msg(csql);
+  if Connection.DbType <> 'postgre' then
+    dbx.SQLConnection.Execute(cSQL, myParams)
+  else begin
+    try
+      if connection.dbx.InTransaction then
+        dbx.SQLConnection.ExecuteDirect('savepoint a');
+      dbx.SQLConnection.Execute(cSQL, myParams);
+    except On E:Exception do
+      begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+        raise;
+      end;
+    end;
+  end;
+  myParams.Free;
+  mm.Clear;
+  FreeAndNil(mm);
+end;
+
+procedure TXDS.DWriteStream(fname, table, where: String;stm : TStringStream;isblob:boolean);
+var
+  csql : String;
+  myParams: TParams;
+begin
+  if gf.lowercase_tablenames then table := LowerCase(table);
+  if IsBlob then
+  begin
+    csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+    myParams := TParams.Create;
+    myParams.Clear;
+    myParams.CreateParam(ftBlob, 'MemoParam', ptInput);
+    myparams.ParamByName('memoparam').LoadFromStream(stm, ftBlob);
+    gf.DoDebug.msg(csql);
+    if Connection.DbType <> 'postgre' then
+      dbx.SQLConnection.Execute(cSQL, myParams)
+    else begin
+      try
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('savepoint a');
+        dbx.SQLConnection.Execute(cSQL, myParams);
+      except On E:Exception do
+        begin
+          if connection.dbx.InTransaction then
+            dbx.SQLConnection.ExecuteDirect('rollback to a');
+          raise;
+        end;
+      end;
+    end;
+    FreeAndNil(myParams);
+  end else
+  begin
+    csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+    myParams := TParams.Create;
+    myParams.Clear;
+    myParams.CreateParam(ftMemo, 'MemoParam', ptInput);
+    myparams.ParamByName('memoparam').AsString := stm.DataString;
+    gf.DoDebug.msg(csql);
+    if Connection.DbType <> 'postgre' then
+      dbx.SQLConnection.Execute(cSQL, myParams)
+    else begin
+      try
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('savepoint a');
+        dbx.SQLConnection.Execute(cSQL, myParams);
+      except On E:Exception do
+        begin
+          if connection.dbx.InTransaction then
+            dbx.SQLConnection.ExecuteDirect('rollback to a');
+          raise;
+        end;
+      end;
+    end;
+    myParams.Free;
+  end;
+end;
+
+procedure TXDS.ReadMemo(fname, filename: String);
+begin
+  xreadMemo(fname, filename);
+end;
+
+procedure TXDS.ReadStream(fname,sname: String ; stm : TStringStream);
+begin
+  xreadStream(fname,sname, stm);
+end;
+
+procedure TXDS.WriteMemo(fname, table, where, filename: String);
+begin
+  xwriteMemo(fname, table, where, filename);
+end;
+
+procedure TXDS.WriteStream(fname, table, where:String; stm: TStringStream;isblob:boolean);
+begin
+  xwriteStream(fname, table, where, stm,isblob);
+end;
+
+function TXDS.GetFieldType(fname:String):String;
+var ft:TFieldType;
+begin
+  ft:=Fieldbyname(fname).DataType;
+  if (ft=ftSmallInt) or (ft=ftWord) or (ft=ftCurrency) or (ft=ftLargeInt) or (ft = ftfloat) or (ft = ftInteger) or (ft=ftBCD) or (ft=ftFmtBCD) then
+    result := 'n'
+  else if (ft = ftDateTime) or (ft=ftTimeStamp) or (ft=ftDate) or (ft=ftTime) then
+    result := 'd'
+  else
+    result := 'c';
+end;
+
+procedure TXDS.ClearParams;
+var i:integer;
+begin
+  if buffered then begin
+    for i:=0 to cds.Params.Count-1 do
+      cds.Params[i].Bound:=false;
+  end;
+end;
+
+
+procedure TXDS.DReadBlob(fname, filename: String);
+begin
+  TBlobField(dbx.FieldByName(fname)).SaveToFile(FileName);
+end;
+
+procedure TXDS.DWriteBlob(fname, table, where, filename: String);
+var
+  csql : String;
+  myParams : TParams;
+begin
+  if gf.lowercase_tablenames then table := LowerCase(table);
+  csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+  myParams := TParams.Create;
+  myParams.Clear;
+  myParams.CreateParam(ftBlob, 'MemoParam', ptInput);
+  myparams.ParamByName('memoparam').LoadFromFile(filename, ftBlob);
+  gf.DoDebug.msg(csql);
+  dbx.SQLConnection.Execute(cSQL, myParams);
+  myParams.Free;
+end;
+
+procedure TXDS.aWriteBlob(fname, table, where, filename: String);
+var
+  csql : String;
+begin
+  csql := 'UPDATE '+table+' SET '+fname+' = :MemoParam WHERE '+where;
+  gf.DoDebug.msg(csql);
+  ado.SQL.Text := csql;
+  ado.Parameters.Items[0].LoadFromFile(filename, ftBlob);
+  ado.ExecSQL;
+end;
+
+procedure TXDS.aReadBlob(fname, filename: String);
+  var ByteArray : TByteDynArray;
+  stm : TStringStream ;
+  Count : integer;
+  pTemp : Pointer;
+begin
+  if Connection.DbType = 'ms sql' then
+    TBlobField(ado.FieldByName(fname)).SaveToFile(FileName)
+  else
+  begin
+    stm := TStringStream.Create('');
+    ByteArray := ado.FieldByName(fname).Value;
+    Count := Length( ByteArray );
+    pTemp := @ByteArray[0];
+    stm.Write(pTemp^, Count);
+    stm.SaveToFile(FileName);
+    FreeAndNil(stm);
+    ByteArray := nil;
+  end;
+end;
+
+procedure TXDS.ReadBlob(fname, filename: String);
+begin
+  xreadBlob(fname, filename);
+end;
+
+procedure TXDS.WriteBlob(fname, table, where, filename: String);
+begin
+  xwriteBlob(fname, table, where, filename);
+end;
+
+function TXDS.StoredProcExec(spname,invars,outvars:String) : String ;
+begin
+  result := XStoredProcExec(spname,invars,outvars);
+end;
+
+function TXDS.DStoredProcExec(spname,invars,outvars:String) : String ;
+var i,j : integer;
+    s,v : String;
+    p1 : TParam;
+begin
+  result := '';
+  i := 1;
+  if gf.lowercase_tablenames then spName := LowerCase(spName) //needs to check whether we have to convert SP to lowercase
+  else spName := uppercase(spName);
+  spDbx.StoredProcName := spName;
+  try
+    if Connection.DbType = 'postgre' then
+    begin
+      spDbx.Params.Clear;
+      spDbx.ParamCheck := False;
+      while true do
+      begin
+        s := gf.GetnthString(invars,i,'~');
+        if s = '' then break;
+        P1 := TParam.Create(spDbx.Params, ptInput);
+        spDbx.Params[i-1].Value := s;
+        i := i + 1;
+      end;
+      if connection.dbx.InTransaction then
+       dbx.SQLConnection.ExecuteDirect('savepoint a');
+    end else
+    begin
+      while true do
+      begin
+        s := gf.GetnthString(invars,i,'~');
+        if s = '' then break;
+        spDbx.Params[i-1].Value := s;
+        i := i + 1;
+      end;
+    end;
+    spDbx.ExecProc;
+    j := 1;
+    while true do
+    begin
+      s := gf.GetnthString(outvars,j);
+      if s = '' then break;
+      if Connection.DbType = 'postgre' then
+        P1 := TParam.Create(spDbx.Params, ptOutput);
+      v := spDbx.Params[i-1].AsString;
+      s := s + '=' + v;
+      j := j + 1;
+      i := i + 1;
+      result := result + s + '~';
+    end;
+    s := '';
+  except on e:exception do
+    begin
+       if Connection.DbType = 'postgre' then
+       begin
+        if connection.dbx.InTransaction then
+          dbx.SQLConnection.ExecuteDirect('rollback to a');
+       end;
+       if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\DStoredProcExec - '+e.Message);
+       gf.DoDebug.Msg('Error in stored procedure : ' + spName);
+       gf.DoDebug.Msg('Error Message : ' + e.Message);
+       Raise;
+    end;
+  end;
+end;
+
+function TXDS.AStoredProcExec(spname,invars,outvars:String) : String ;
+var i,j,k : integer;
+    s,v : String;
+begin
+  result := '';
+  i := 1;
+  spAdo.ProcedureName := spName;
+  spAdo.Parameters.Refresh;
+  spAdo.Parameters[i-1].Value := null;
+  try
+    while true do
+    begin
+      s := gf.GetnthString(invars,i,'~');
+      if s = '' then break;
+      spAdo.Parameters[i].Value := s;
+      i := i + 1;
+    end;
+    k := i;
+    j := 1;
+    while true do
+    begin
+      s := gf.GetnthString(outvars,j,',');
+      if s = '' then break;
+      spAdo.Parameters[i].Value := null;
+      i := i + 1;
+      j := j + 1;
+    end;
+    spAdo.ExecProc;
+    j := 1;
+    while true do
+    begin
+      s := gf.GetnthString(outvars,j);
+      if s = '' then break;
+      v := spAdo.Parameters[k].Value;
+      s := s + '=' + v;
+      j := j + 1;
+      k := k + 1;
+      result := result + s + '~';
+    end;
+    s := '';
+  except on e:exception do
+    begin
+       if assigned(gf) then  gf.DoDebug.Log(gf.Axp_logstr+'\uXDS\AStoredProcExec - '+e.Message);
+       gf.DoDebug.Msg('Error in stored procedure : ' + spName);
+       gf.DoDebug.Msg('Error Message : ' + e.Message);
+       Raise;
+    end;
+  end;
+end;
+
+function TXDS.GetTable:String;
+begin
+  result := updatetable;
+end;
+
+procedure Txds.SetCommandTimeout;
+begin
+   ado.CommandTimeout := Connection.dbtimeout;
+   gf.DoDebug.Msg('SqlTimeout for Sqlserver : '+IntToStr(ado.CommandTimeout)+#13#10);
+end;
+
+function Txds.StreamToByteArray(filename : string ) : TByteDynArray;
+   const BLOCK_SIZE=1024;
+   var BytesRead, BytesToWrite, Count : integer;
+       pTemp : Pointer;
+       stm : TMemoryStream;
+begin
+  try
+    try
+      stm := TMemoryStream.Create;
+      stm.LoadFromFile(filename);
+      stm.Position := 0;
+      Count := stm.Size;
+      SetLength(Result, Count );
+      pTemp := @Result[0];
+      BytesRead := BLOCK_SIZE;
+      while (BytesRead = BLOCK_SIZE ) do
+      begin
+        BytesToWrite := Min(Count, BLOCK_SIZE);
+        BytesRead := stm.Read(pTemp^,BytesToWrite);
+        pTemp := Pointer(LongInt(pTemp) + BLOCK_SIZE);
+        Count := Count-BytesRead;
+      end;
+      gf.dodebug.msg('Blob field writing to postgre db');
+    except on e:exception do
+      begin
+        gf.dodebug.msg('Blob field writing to postgre db : ' + e.Message);
+        result := nil;
+      end;
+    end;
+  finally
+    FreeAndNil(stm);
+  end;
+end;
+
+procedure Txds.KillInactiveSession;
+  var s, sid , slno : AnsiString;
+begin
+  try
+    s := UpperCase(connection.ProjectName);
+    Dbx.Close;
+    dbx.SQL.Text := 'SELECT s.sid,s.serial# FROM v$session s, v$process p WHERE s.username = ' + quotedstr(s)+ ' AND p.addr(+) = s.paddr and status = ' + quotedstr('INACTIVE') + 'ORDER BY s.last_call_et' ;
+    dbx.Open;
+    sid := dbx.Fields[0].AsAnsiString;
+    slno := dbx.Fields[1].AsAnsiString;
+    sid := quotedstr(sid + ',' + slno);
+    Dbx.Close;
+    dbx.SQL.Text := 'ALTER SYSTEM KILL SESSION ' + sid + ' IMMEDIATE';
+    dbx.ExecSQL(false);
+  except on e:exception do
+    s := e.Message
+  end;
+end;
+
+procedure TXDS.SetCDSName(Name: String);
+begin
+  CDSName := Name;
+end;
+
+end.
+

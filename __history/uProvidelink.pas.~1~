@@ -1,0 +1,1863 @@
+Unit uProvideLink;
+{copied from ver 10.8}
+{Copied from Axpert9-XE3\Ver 11.1}
+
+Interface
+
+Uses Classes, forms, sysutils, controls, db, uStoreData, uProfitEVAL,
+uGeneralFunctions, ExtCtrls, Variants, uValidate, uStructDef, uXDS, XMLDoc,
+XMLIntf, uPropsXML, uDoDebug,uFillStruct;
+
+Type
+  PCompanySQL = ^TCompanySQL;
+  TCompanySQL = Record
+    SQLText: String;
+  End;
+  TOnCallLinkAction=procedure(aname:String;anode:ixmlnode) of object;
+  TOnSqlPost=function(SQLText, Target, GroupField, PrimaryField: String;SQLName:String='') : String of object;
+  TBeforeEventProc=Procedure(RecValidate:TValidate) of object;
+  TAfterEventProc=Procedure of object;
+  TProcessDataExch=procedure(pStruct:TStructDef;pStoreData : TStoreData;pParser : TProfitEval) of object;
+  pStoreDataRec = ^TStoreDataRec;
+  TStoreDataRec = Record
+    StoreData: TStoreData;
+    SourceFrame: Integer;
+    MapName: String;
+    SourceTransId: String;
+    TargetTransId: String;
+    ControlFieldName: String;
+    CompanyFieldName: String;
+    MaxRowList: TStringList;
+    SubTypeField: String;
+    Posted, PostOnApprove, PostOnReject: Boolean;
+    Validate : TValidate;
+    UpdatePosted : Char;
+    Struct : TStructDef;
+    node : IXMLNode;
+    Expr : TStringList;
+    SourceMapName : String;
+    SourcePopIndex : integer;
+    PopParentFrameNo : Integer;
+    SourceIndex,MapIndex : Integer;
+  End;
+
+  TProvideLink = Class
+  Private
+    fTransId: String;
+    FieldValue: String;
+    OldFieldValue: String;
+    IdValue: extended;
+    OldIdValue: extended;
+    ParentTransid, ParentFldName : String;
+    MapName : String;
+    PostedQ, QCheck : TXDS;
+    ParentRowNo: Integer;
+//    Sequence: TDBDataSet;
+    FieldValueList: TStringList;
+    GroupFieldValues: TStringList;
+    IdValueList: TStringList;
+    ParentRecordId: Extended;
+    ParentDocId, ParentPrimaryId: extended;
+    LastDataType: Char;
+    FieldsAdded: TStringList;
+    RowsAdded: TStringList;
+    InvalidRows : TStringList;
+    fld : pFld;
+    struct : TStructDef;
+    map : ixmlnode;
+    rowexists : Boolean;
+    SourceMapName : String;
+    SourceIndex : integer;
+    mlist : TStringList;
+    dmlist : TStringList;
+    EventList: TList;
+    ActNode : ixmlnode;
+    Function SaveTrans(RowNo: integer): boolean;
+    Procedure ClearStoreDataList;
+    Procedure GetFieldValue(FieldName: String; RowNo: Integer);
+    Function GetIdValueFromSD(FieldName: String; RowNo: integer): extended;
+    Function GetValueFromSD(FieldName: String; RowNo: integer): String;
+    Procedure LinkDetailToSD;
+    Function GetFieldValueFromParent(FieldName: String; RowNo: Integer): String;
+    Procedure TrimExtraRowsInTarget(Frameno, ParentCount, Count: Integer);
+    Function DeleteTrans: boolean;
+    Function GetFieldOfFrame(SD: TStoreData; FrameNo: Integer): String;
+    Function DeleteLinkForDeletedLines(sdInd:integer): boolean;
+    Function GetRecordId(SD: TStoreData; FrameNo, RowNo: integer): Extended;
+    Procedure FillSpecificRow;
+    Procedure FillGridToGrid;
+    Procedure FillGroupedGridToGrid;
+    Function ValidRow(RowNo:integer):boolean;
+    function LinkDefLoaded(Name:String):boolean;
+    Function IsFieldExists(FieldName:String;Rowno:integer):Boolean;
+    function GetSourceFrameNo: integer;
+    function CallSaveTrans(j: Integer): Boolean;
+    Function PostChildTrans(j: integer):boolean;
+    function DeleteChildTrans(j:integer) : boolean;
+    procedure DoEvalExprSet(eventname:String);
+    procedure CanUpdatePosted(tabname: String);
+    procedure SetPosted(MapName:String; RecordId: Extended);
+    function GetMapParentRecordId(SD: TStoreData; FrameNo, RowNo: integer): Extended;
+    function GetParentRowNo(IdField, IdValue:String; ParentFrame :integer):integer;
+    procedure SetParentRows;
+    procedure PrepareExps;
+    procedure Readdef(xml: IXMLNode);
+    procedure LoadGenMap(src:String;xnode: ixmlnode);
+    procedure CreateExprList(n:ixmlnode);
+    procedure OnFill(xmlStr: String);
+    function ExecuteAction(Event, Element: String): String;
+    procedure CreateEventList;
+    procedure InitGrid(FrameNo: integer);
+    function GetParentActiveRow(SD: TStoreData; RowNo,
+      Popindex: Integer): Integer;
+    procedure GetParentValue(SD:TStoreData;frmno, rowno: integer; pFields: String;
+      sList: TStrings);
+    function IsParentAutoRecFound(pTransid, pFldName: String): Boolean;
+    procedure AddDepsToAutoGenList(FldName: String);
+    procedure CloseRefreshQueries(sd: TStoreData);
+    procedure ResetMaxRowList(SdRec: pStoreDataRec);
+
+
+
+  Protected
+    StoreDataRec: pStoreDataRec;
+    StoreData: TStoreData;
+
+  Public
+    StoreDataList: TList;
+    UserId: Integer;
+    Modify: Boolean;
+    ParentStoreData: TStoreData;
+    ProgressBar: TPanel;
+    CancelTrans: Boolean;
+    CancelRemarks : String;
+//    UserName: String;
+    WorkOnQuery: Boolean;
+    ProviderQuery: TXDS;
+    SelectedList : TStringList;
+    ShowSubForm : String;
+    ExcludeMapIds : String;
+    CallLinkAction : TOnCallLinkAction;
+    WorkFlow : String;
+    SqlPost : TOnSqlPost;
+    BeforeEventProc : TBeforeEventProc;
+    AfterEventProc : TAfterEventProc;
+    ProcessDataExch : TProcessDataExch;
+    GenMapsForRepost : TStringList;
+    PostChildGenMaps : Boolean;
+    Constructor Create(pstruct:TStructDef); Virtual;
+    Destructor Destroy; Override;
+    Function SaveLinkTrans(ParentTableId:  Extended): boolean;
+    Function DeleteLinkTrans(ParentTableId: Extended): boolean;
+    Procedure EndSave;
+    function SaveLinkTransForRepost(ParentTableId: Extended): boolean;
+    function DeleteLinkTransForRepost(ParentTableId: Extended): boolean;
+  End;
+
+Implementation
+
+Constructor TProvideLink.Create(pstruct:TStructDef);
+var k, l, i:integer;
+Begin
+  Inherited create;
+  struct := pStruct;
+  StoreDataList := nil;
+  StoreDataList := TList.Create;
+  FieldValueList := nil;
+  FieldValueList := TStringList.Create;
+  GroupFieldValues := nil;
+  GroupFieldValues := TStringList.Create;
+  IdValueList := nil;
+  IdValueList := TStringList.Create;
+  Modify := false;
+  ProgressBar := Nil;
+  CancelTrans := false;
+  CancelRemarks := '';
+  FieldsAdded := nil;
+  FieldsAdded := TStringList.Create;
+  RowsAdded := nil;
+  RowsAdded := TStringList.Create;
+  InvalidRows := nil;
+  InvalidRows := TStringList.create;
+  mlist := nil;
+  mlist := TStringList.Create;
+  dmlist := nil;
+  dmlist := TStringList.Create;
+  EventList := nil;
+  EventList := TList.create;
+  GenMapsForRepost := TStringList.Create;
+  PostChildGenMaps := True;
+  WorkOnQuery := false;
+  ProviderQuery := Nil;
+  SelectedList := nil;
+  PostedQ := nil;
+  QCheck:=nil;
+  ExcludeMapIds := '';
+  SourceMapName := '';
+  SourceIndex := -1;
+  ReadDef(struct.xml.documentelement);
+  ftransid:=struct.xml.DocumentElement.ChildNodes[0].ChildValues[xml_name];
+  WorkFlow:='';
+  k := 0;
+  struct.axprovider.dbm.gf.dodebug.msg('Loading genmaps');
+  While true Do Begin
+    l := storedataList.count;
+    If k >= l Then break;
+    For i := k To l - 1 Do begin
+      SourceMapName := pStoreDataRec(StoreDataList[i]).MapName;
+      SourceIndex := i;
+      ReadDef(pStoreDataRec(StoreDataList[i]).Struct.xml.DocumentElement);
+    end;
+    k := l;
+  End;
+  BeforeEventProc := nil;
+  AfterEventProc := nil;
+End;
+
+Destructor TProvideLink.Destroy;
+Var i: integer;
+Begin
+  ClearStoreDataList;
+  StoreDataList.Free;
+  FieldValueList.Clear;
+  GroupFieldValues.Clear;
+  IdValueList.Clear;
+  FieldValueList.Free;
+  GroupFieldValues.Free;
+  IdValueList.Free;
+  FieldsAdded.clear;
+  FieldsAdded.free;
+  InvalidRows.clear;
+  InvalidRows.Free;
+  RowsAdded.Clear;
+  RowsAdded.free;
+  mlist.Clear;
+  mlist.Free;
+  dmlist.Clear;
+  dmlist.Free;
+  if assigned(PostedQ) then
+  begin
+    PostedQ.close;
+    PostedQ.destroy;
+  end;
+  if assigned(QCheck) then
+  begin
+    QCheck.close;
+    QCheck.destroy;
+  end;
+  if assigned(EventList) then
+  begin
+    for i := 0 to EventList.Count-1 do
+      Dispose(pEventRec(EventList[i]));
+    EventList.Destroy;
+    EventList := nil;
+  end;
+  GenMapsForRepost.Clear;
+  FreeAndNil(GenMapsForRepost);
+  Inherited destroy;
+End;
+
+procedure TProvideLink.Readdef(xml:IXMLNode);
+var i:integer;
+    name, src:String;
+begin
+  src:=xml.ChildNodes[0].ChildValues[xml_name];
+  for i:=0 to xml.ChildNodes.Count-1 do begin
+    if (not xml.childnodes[i].HasAttribute('cat')) or  (xml.ChildNodes[i].Attributes['cat']<>'genmap') then continue;
+    name:=vartostr(xml.ChildNodes[i].ChildValues[xml_name]);
+    if (excludemapids <> '') and (pos(name,excludemapids) >=0) then continue
+    else if (assigned(SelectedList)) and (selectedList.IndexOf(name) = -1) then continue
+    else begin
+      if (struct.axprovider.dbm.gf.ForRepostGenMaps) then
+      begin
+        if (SourceMapName <> '')  then
+          if xml.ChildNodes[i].ChildValues[xml_active] <> 'True' then continue
+      end
+      else
+        if xml.ChildNodes[i].ChildValues[xml_active] <> 'True' then continue;
+    end;
+ //   else if LinkDefLoaded(name) then continue;
+    try
+      LoadGenMap(src, xml.ChildNodes[i]);
+    Except on E:Exception do
+    begin
+      struct.axprovider.dbm.gf.dodebug.msg('LoadGenMap '+E.message);
+      Continue;
+    end;
+    end;
+  end;
+
+end;
+
+procedure TProvideLink.LoadGenMap(src:String; xnode:ixmlnode);
+Var p, i, k: integer;
+    sdef, pstruct : TStructDef;
+    s:String;
+    f:pfrm;
+Begin
+  s:=vartostr(xnode.ChildValues[xml_gentarget]);
+  sdef := TStructDef.Create(struct.axprovider, s, '','');
+  if not assigned(sdef.xml) then begin
+    sdef.Destroy;
+    sdef := nil;
+    exit;
+  end;
+
+  New(StoreDataRec);
+  StoreDataRec.Struct := Sdef;
+  StoreDataRec.node:=xnode.ChildNodes.FindNode(xml_gmap);
+
+  struct.axprovider.dbm.gf.dodebug.msg('Post on approve = '+vartostr(xnode.childvalues[xml_onapprove]));
+  StoreDataRec.PostOnApprove:=lowercase(vartostr(xnode.childvalues[xml_onapprove]))='true';
+  StoreDataRec.PostOnReject:=lowercase(vartostr(xnode.childvalues[xml_onreject]))='true';
+  StoreDataRec.Mapname := vartostr(xnode.childvalues[xml_name]);
+  StoreDataRec.StoreData := TStoreData.Create(sdef, sdef.Transid);
+  StoreDataRec.StoreData.ProgressBar := ProgressBar;
+  StoreDataRec.StoreData.ControlField := sdef.savecontrol;
+  StoreDataRec.StoreData.PrimaryTableName := sdef.PrimaryTable;
+  StoreDataRec.StoreData.UserName := struct.axprovider.dbm.gf.UserName;
+  StoreDataRec.StoreData.SiteNo := struct.axprovider.dbm.gf.SiteNo;
+  StoreDataRec.StoreData.CompanyName := sdef.SchemaName;
+  StoreDataRec.TargetTransId := sdef.TransId;
+  StoreDataRec.SourceTransId := src;
+  StoreDataRec.SourceMapName := SourceMapName;
+  StoreDataRec.SourceIndex := SourceIndex;
+  StoreDataRec.MapIndex := StoreDataList.Count;
+  if src=struct.Transid then pstruct:=struct
+  else begin
+    pstruct:=pStoredataRec(storedatalist[SourceIndex]).Struct;
+  end;
+  s:=vartostr(xnode.childvalues[xml_genparent]);
+  if s='' then  s:= pstruct.xml.DocumentElement.ChildNodes[1].ChildNodes[xml_name].NodeValue;
+  if s='' then raise EDatabaseerror.create('Source DC not specified in genmap definition '+storedatarec.MapName);
+  f:=pstruct.GetFrame(s);
+  s:=inttostr(f.FrameNo);
+  StoreDataRec.SourceFrame := struct.axprovider.dbm.gf.strtointz(s)-1;;
+  StoreDataRec.SourcePopIndex := f.PopIndex;
+  if f.popindex > -1 then
+    StoreDataRec.PopParentFrameNo := pPopGrid(Struct.popgrids[f.popindex]).ParentFrameNo
+  else
+    StoreDataRec.PopParentFrameNo := -1;
+  StoreDataRec.ControlFieldName := vartostr(xnode.childvalues[xml_gencontrol]);
+  StoreDataRec.CompanyFieldName := vartostr(xnode.childvalues[xml_gencfield]);
+  StoreDataRec.MaxRowList := TStringList.Create;
+  For i := 1 To sdef.framecount do
+    StoreDataRec.MaxRowList.Add('0');
+
+  StoreDataRec.Posted := false;
+
+  StoreDataRec.Validate := TValidate.Create(struct.axprovider);
+  StoreDataRec.validate.sdef := sdef;
+  StoreDataRec.Validate.FromMap := true;
+  StoreDataRec.Validate.StoreData := StoreDataRec.StoreData;
+  StoreDataRec.Validate.StoreData.RefreshAutoGen := StoreDataRec.Validate.RefreshAutoGen;
+  StoreDataRec.Validate.SubTypeField := StoreDataRec.SubTypeField;
+  StoreDataRec.Validate.Parser.RegisterVar('ApprovalNo', 'n', IntToStr(StoreDataRec.StoreData.ApprovalNo));
+  StoreDataRec.Validate.Parser.RegisterVar('UserName', 'c', struct.axprovider.dbm.gf.UserName);
+  StoreDataRec.Validate.Parser.RegisterVar('UserCategory', 'c', struct.axprovider.dbm.gf.UserCategory);
+  StoreDataRec.Validate.Parser.RegisterVar('UserDepartment', 'c', struct.axprovider.dbm.gf.UserDepartment);
+  StoreDataRec.Validate.Parser.RegisterVar('finyrst', 'd', DateToStr(struct.axprovider.dbm.gf.finyrst));
+  StoreDataRec.Validate.Parser.RegisterVar('finyred', 'd', DateToStr(struct.axprovider.dbm.gf.finyred));
+  StoreDataRec.Validate.Parser.RegisterVar('afinyrst', 'd', DateToStr(struct.axprovider.dbm.gf.afinyrst));
+  StoreDataRec.Validate.Parser.RegisterVar('afinyred', 'd', DateToStr(struct.axprovider.dbm.gf.afinyred));
+  StoreDataRec.Validate.Parser.RegisterVar('recordid', 'n', '0');
+  StoreDataRec.Validate.Parser.RegisterVar('dbrep', 'c', struct.axprovider.dbm.gf.dbrep);
+  StoreDataRec.Validate.Parser.RegisterVar('crrep', 'c', struct.axprovider.dbm.gf.crrep);
+  StoreDataRec.Validate.Parser.OnInitGrid := InitGrid;
+  StoreDataRec.UpdatePosted := chr(32);
+//  CanUpdatePosted(uppercase(trim(StoreDataRec.SourceTransid)) + 'POSTED'); //according to sabarish sir instructions code has been commented
+  PrepareExps;
+  StoreDataRec.Expr := TStringList.create;
+  CreateExprList(xnode.ChildNodes.FindNode(xml_onpost));
+  StoreDataList.Add(StoreDataRec);
+end;
+
+procedure TProvideLink.PrepareExps;
+var i:integer;
+   fld : pfld;
+begin
+  for i:=0 to StoreDataRec.Struct.flds.count-1 do begin
+    fld:=pfld(StoreDataRec.Struct.flds[i]);
+    if fld.cexp <> '' then
+      fld.Exprn:=StoreDataRec.Validate.Parser.Prepare(fld.cexp);
+    if fld.cvalexp<>'' then
+      fld.ValExprn:=StoreDataRec.Validate.parser.Prepare(fld.cvalexp);
+  end;
+end;
+
+function TProvideLink.LinkDefLoaded(name:String):boolean;
+var i:integer;
+begin
+ Result := false;
+ for i:=0 to storedatalist.count-1 do begin
+  if pstoredatarec(storedatalist[i]).mapname = name then begin
+   result := true;
+   break;
+  end;
+ end;
+end;
+
+Procedure TProvideLink.ClearStoreDataList;
+Var i,j: integer;
+Begin
+  For i := 0 To StoreDataList.Count - 1 Do
+  Begin
+    pStoreDataRec(StoreDataList[i]).StoreData.Destroy;
+    if Assigned(pStoreDataRec(StoreDataList[i]).MaxRowList) then
+    begin
+      pStoreDataRec(StoreDataList[i]).MaxRowList.Clear;
+      pStoreDataRec(StoreDataList[i]).MaxRowList.Free;
+    end;
+    if Assigned(pStoreDataRec(StoreDataList[i]).Validate) then
+    begin
+      pStoreDataRec(StoreDataList[i]).Validate.Free;
+    end;
+    if Assigned(pStoreDataRec(StoreDataList[i]).struct) then
+    begin
+      pStoreDataRec(StoreDataList[i]).struct.Free;
+    end;
+    if assigned(pStoreDataRec(StoreDataList[i]).Expr) then
+    begin
+      pStoreDataRec(StoreDataList[i]).Expr.Clear;
+      FreeAndNil(pStoreDataRec(StoreDataList[i]).Expr);
+    end;
+    dispose(StoreDataList[i]);
+  End;
+  StoreDataList.Clear;
+End;
+
+Function TProvideLink.SaveLinkTrans(ParentTableId: Extended): boolean;
+Var
+  i, j, k, MaxRow: integer;
+  SD: TStoreData;
+  firsttime : Boolean;
+Begin
+    struct.axprovider.dbm.gf.DoDebug.msg('>>Executing genmaps');
+    result := false;
+    ParentRecordId := ParentTableId;
+    EndSave;
+    struct.axprovider.dbm.gf.FillAllFields := True;
+    For i := 0 To StoreDataList.count - 1 Do Begin
+      StoreDataRec := StoreDataList[i];
+      StoreData := StoreDataRec.StoreData;
+      If storedatarec.SourceMapName='' Then Begin
+        SD := ParentStoreData;
+      End Else Begin
+        continue;
+      End;
+      If WorkOnQuery Then StoreDataRec.SourceFrame := -2;
+      ParentPrimaryId := SD.LastSavedRecordId;
+
+      If StoreDataRec.SourceFrame > 0 Then Begin
+        If Not DeleteLinkForDeletedLines(i) Then exit;
+        MaxRow := SD.GetRowCount(StoreDataRec.SourceFrame + 1);
+        For j := 1 To MaxRow Do Begin
+          struct.axprovider.dbm.gf.DoDebug.msg('>>Posting from '+StoreDataRec.Sourcetransid+' to '+Storedatarec.targettransid+' from row '+inttostr(j));
+          ParentDocId := GetRecordId(SD, StoreDataRec.SourceFrame + 1, j);
+          StoreData.MapParentRecordId := GetMapParentRecordId(SD, StoreDataRec.SourceFrame + 1, j);
+          if CallSaveTrans(j) then begin
+            if StoreData.Deleted then
+              DeleteChildTrans(j)
+            else
+              PostChildTrans(j);
+          end;
+        End;
+      End Else Begin
+        struct.axprovider.dbm.gf.DoDebug.msg('>>Posting from '+StoreDataRec.Sourcetransid+' to '+Storedatarec.targettransid);
+        If Not workonquery Then
+          ParentDocId := SD.LastSavedRecordId
+        Else
+          ParentDocid := ParentTableId;
+        StoreData.MapParentRecordId := 0;
+        if CallSaveTrans(1) then begin
+          if StoreData.Deleted then
+            DeleteChildTrans(1)
+          else
+            PostChildTrans(1);
+        end;
+      End;
+    End;
+    EndSave;
+    struct.axprovider.dbm.gf.FillAllFields := False;
+    Result := true;
+End;
+
+Procedure TProvideLink.EndSave;
+Var i: integer;
+Begin
+  For i := 0 To StoreDataList.count - 1 Do Begin
+    pStoreDataRec(StoreDataList[i]).Posted := false;
+    pStoreDataRec(StoreDataList[i]).StoreData.EndSave;
+    pStoreDataRec(StoreDataList[i]).StoreData.ClearFieldList;
+    CloseRefreshQueries(pStoreDataRec(StoreDataList[i]).StoreData);
+    ResetMaxRowList(pStoreDataRec(StoreDataList[i]));
+  End;
+End;
+
+Function TProvideLink.CallSaveTrans(j : Integer) : Boolean;
+begin
+
+  Result := false;
+  If StoreDataRec.CompanyFieldName <> '' Then Begin
+    FieldValue := GetFieldValueFromParent(StoreDataRec.CompanyFieldName, j);
+    If FieldValue = '' Then
+      FieldValue := GetFieldValueFromParent(StoreDataRec.CompanyFieldName, 1);
+    If (FieldValue <> OldFieldValue) And (OldFieldValue <> '') Then Begin
+      StoreData.CompanyName := OldFieldValue;
+      struct.axprovider.dbm.gf.dodebug.msg('Company name changed from '+OldFieldValue+' to '+FieldValue);
+      struct.axprovider.dbm.gf.dodebug.msg('Deleting transaction from old company '+OldFieldValue);
+      If Not DeleteTrans Then exit;
+    End;
+    StoreData.CompanyName := FieldValue;
+  End;
+  struct.axprovider.dbm.gf.DoDebug.msg('StoreDataRec.ControlFieldName : ' +StoreDataRec.ControlFieldName);
+  If StoreDataRec.ControlFieldName = '' Then Begin
+    Result:=SaveTrans(j);
+  End Else Begin
+    FieldValue := GetFieldValueFromParent(StoreDataRec.ControlFieldName, j);
+    struct.axprovider.dbm.gf.DoDebug.msg('FieldValue : ' +FieldValue);
+    If FieldValue = '' Then
+      FieldValue := GetFieldValueFromParent(StoreDataRec.ControlFieldName, 1);
+    If lowercase(FieldValue) = 't' Then Begin
+      Result:=SaveTrans(j);
+    End Else If lowercase(OldFieldValue) = 't' Then Begin
+      struct.axprovider.dbm.gf.dodebug.msg('Deleting transaction as controlField value is changed from '+OldFieldValue+' to '+FieldValue);
+      Result:=DeleteTrans;
+    End;
+  End;
+end;
+
+Function TProvideLink.SaveTrans(RowNo: Integer): boolean;
+Var
+  k: integer;
+  SubFormShow : String;
+  flag : Boolean;
+Begin
+  try
+    Result := true;
+    ParentRowNo := RowNo;
+    MapName := StoreDataRec.Mapname;
+    CreateEventList;
+    StoreData.ClearFieldList;
+    StoreData.NoAutoGenStr := '';
+    if struct.axprovider.dbm.Connection.dbType<>'mysql' then
+    begin
+      flag := struct.axprovider.dbm.InTransaction;
+      struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\SaveTrans\ checking InTransaction .(1)');
+      if not flag then
+      begin
+        struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\SaveTrans\ InTransaction - False.(1)');
+        struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\SaveTrans\ Database connection lost. Please resave the transaction.(1)');
+        struct.axprovider.dbm.gf.Db_Conn_Lost := true;
+        raise EDatabaseerror.create('Error in posting data. Please resave the transaction.');
+      end;
+    end;
+    If Modify Then Begin
+      StoreData.ChildTrans := true;
+      StoreData.LoadChildTrans(StoreDataRec.MapName, ParentDocId);
+      SetPosted(storedatarec.MapName, Parentdocid);
+      StoreDataRec.Validate.Parser.RegisterVar('ChildDoc', 'c', StoreData.ChildDoc);
+      StoreDataRec.Validate.Parser.RegisterVar('recordid', 'n', FloatToStr(StoreData.LastSavedRecordId));
+    End else begin
+      StoreDataRec.Validate.Parser.RegisterVar('ChildDoc', 'c', 'F');
+      StoreDataRec.Validate.Parser.RegisterVar('recordid', 'n', '0');
+    end;
+
+  if StoreDataRec.PostOnApprove then begin
+    struct.axprovider.dbm.gf.dodebug.msg('Post on approve is true. Workflow status = '+workflow+' fieldlist count='+inttostr(storedata.fieldlist.count));
+    if StoreDataRec.PostOnReject then begin
+      if (WorkFlow<>'reject') and (WorkFlow<>'approve') and (storedata.fieldlist.count=0) then begin
+        result:=false;
+        exit;
+      end;
+    end else begin
+      if (WorkFlow<>'approve') and (storedata.fieldlist.count=0) then begin
+        result:=false;
+        exit;
+      end;
+    end;
+  end;
+  if StoreDataRec.PostOnReject then begin
+    if StoreDataRec.PostOnApprove then
+    begin
+      if (WorkFlow<>'approve') and (WorkFlow<>'reject') and (storedata.fieldlist.count=0) then exit
+    end else
+    begin
+      if (WorkFlow<>'reject') and (storedata.fieldlist.count=0) then exit;
+    end;
+  end;
+
+  struct.axprovider.dbm.gf.DoDebug.msg('>>Mapping');
+  LinkDetailToSD;
+  StoreDataRec.Validate.Parser.RegisterVar('onsave', 'c','s');
+  StoreDatarec.Struct.ExprSetList.Text := StoreDatarec.Expr.Text;
+  StoreDataRec.Validate.Parser.OnFill := OnFill;
+  DoEvalExprSet('onpostgenmap');
+  ExecuteAction('On post genmap','');
+
+
+  Storedatarec.StoreData.PublicSourceId := ParentDocId;
+  if not StoreDataRec.Validate.FillAndValidate(true) then
+   raise EDataBaseError.Create(StoreDataRec.Validate.ErrorStr);
+
+    StoreDataRec.Validate.Parser.RegisterVar('onsave', 'c','f');
+    if struct.axprovider.dbm.Connection.dbType<>'mysql' then
+    begin
+      flag := struct.axprovider.dbm.InTransaction;
+      struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\SaveTrans\ checking InTransaction.(2)');
+      if not flag then
+      begin
+        struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\SaveTrans\ InTransaction - False.(2)');
+        struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\SaveTrans\ Database connection lost. Please resave the transaction.(2)');
+        struct.axprovider.dbm.gf.Db_Conn_Lost := true;
+        raise EDatabaseerror.create('Error in posting data. Please resave the transaction.');
+      end;
+    end;
+    inc(struct.axprovider.dbm.gf.TransCheckCount);
+    ExecuteAction('Before save transaction','');
+    StoreData.StoreChildTrans(StoreDataRec.Mapname, ParentDocId, ParentPrimaryId);
+    StoreDataRec.Validate.RegisterAfterSave;
+    StoreDataRec.Posted := true;
+    DoEvalExprSet('aftersave');
+    ExecuteAction('After save transaction','');
+    struct.axprovider.InsertIntoTransCheck;
+    //ProcessDataExch | for genmap
+    if assigned(ProcessDataExch) then
+      ProcessDataExch(StoreDataRec.Struct,StoreData,StoreDataRec.Validate.Parser);
+  Except on E:Exception do
+    begin
+      Raise exception.Create(E.Message);
+    end;
+  end;
+End;
+
+Function TProvideLink.PostChildTrans(j:integer):boolean;
+var sdrec : pStoreDataRec;
+    SD: TStoreData;
+    firsttime : Boolean;
+    i,k,m,MaxRow : integer;
+begin
+ Result := false;
+ SdRec := StoreDataRec;
+ mlist.clear;
+ mlist.add(inttostr(storedatarec.mapindex));
+ for i:=0 to StoreDataList.count-1 do begin
+   StoreDataRec := StoreDataList[i];
+   if mlist.indexof(inttostr(storedatarec.sourceindex)) > -1 then begin
+      mlist.add(inttostr(storedatarec.mapindex));
+      StoreData := StoreDataRec.StoreData;
+      k:=storedatarec.SourceIndex;
+      SD := pStoredataRec(storedatalist[k]).StoreData;
+      If StoreDataRec.SourceFrame > 0 Then begin
+        If Not DeleteLinkForDeletedLines(i) Then exit;
+        MaxRow := SD.GetRowCount(StoreDataRec.SourceFrame + 1);
+        For m := 1 To MaxRow Do Begin
+          struct.axprovider.dbm.gf.DoDebug.msg('>>Posting from '+StoreDataRec.Sourcetransid+' to '+Storedatarec.targettransid+' from row '+inttostr(m));
+          ParentDocId := GetRecordId(SD, StoreDataRec.SourceFrame + 1, m);
+          StoreData.MapParentRecordId := GetMapParentRecordId(SD, StoreDataRec.SourceFrame + 1, m);
+          CallSaveTrans(m);
+        End;
+      end else begin
+        ParentDocId := SD.LastSavedRecordId;
+        if not CallSaveTrans(j)then
+           mlist.Delete(mlist.IndexOf(inttostr(storedatarec.mapindex)));
+      end;
+   end;
+ end;
+ StoreDataRec := sdrec;
+ StoreData := StoreDataRec.StoreData;
+ Result := true;
+end;
+
+
+{Function TProvideLink.PostChildTrans(j,sdind:integer):boolean;
+var sdrec : pStoreDataRec;
+    SD: TStoreData;
+    firsttime : Boolean;
+    i,k : integer;
+begin
+ Result := false;
+ SdRec := StoreDataRec;
+ for i:=0 to StoreDataList.count-1 do begin
+   StoreDataRec := StoreDataList[i];
+   if (lowercase(StoreDataRec.SourceTransid) = lowercase(SdRec.TargetTransid)) and (StoreDataRec <> SdRec) then begin
+      StoreData := StoreDataRec.StoreData;
+
+      SD := SdRec.StoreData;
+      ParentIndex := sdind;
+      If StoreDataRec.SourceFrame > 0 Then begin
+        ParentDocId := GetRecordId(SD, StoreDataRec.SourceFrame + 1, j);
+      end else
+        ParentDocId := SD.LastSavedRecordId;
+      CallSaveTrans(j);
+   end;
+ end;
+
+ StoreDataRec := sdrec;
+ StoreData := StoreDataRec.StoreData;
+ Result := true;
+end;}
+
+Function TProvideLink.DeleteChildTrans(j:integer) : boolean;
+var sdrec : pStoreDataRec;
+    SD: TStoreData;
+    firsttime : Boolean;
+    i,k,MaxRow,m : integer;
+begin
+ Result := false;
+ SdRec := StoreDataRec;
+ dmlist.clear;
+ dmlist.add(inttostr(storedatarec.mapindex));
+ for i:=0 to StoreDataList.count-1 do begin
+   StoreDataRec := StoreDataList[i];
+   if dmlist.indexof(inttostr(storedatarec.sourceindex)) > -1 then begin
+      dmlist.add(inttostr(storedatarec.mapindex));
+      StoreData := StoreDataRec.StoreData;
+      k:=storedatarec.SourceIndex;
+      SD := pStoredataRec(storedatalist[k]).StoreData;
+      If StoreDataRec.CompanyFieldName <> '' Then Begin
+        FieldValue := GetFieldValueFromParent(StoreDataRec.CompanyFieldName, 1);
+        StoreData.CompanyName := FieldValue;       // StoreData.CompanyName := OldFieldValue; by dhurga
+      End;
+      If StoreDataRec.SourceFrame > 0 Then begin
+        If Not DeleteLinkForDeletedLines(i) Then exit;
+        MaxRow := SD.GetRowCount(StoreDataRec.SourceFrame + 1);
+        For m := 1 To MaxRow Do Begin
+          ParentDocId := GetRecordId(SD, StoreDataRec.SourceFrame + 1, m);
+          StoreData.MapParentRecordId := GetMapParentRecordId(SD, StoreDataRec.SourceFrame + 1, m);
+          if not DeleteTrans then begin
+            exit;
+          end;
+        End;
+      end else begin
+        ParentDocId := SD.LastSavedRecordId;
+        if not DeleteTrans then begin
+          exit;
+        end;
+      end;
+   end;
+ end;
+ StoreDataRec := sdrec;
+ StoreData := StoreDataRec.StoreData;
+ Result := true;
+end;
+
+Procedure TProvideLink.GetFieldValue(FieldName: String; RowNo: Integer);
+Var
+  k: integer;
+  pr: TProfitEval;
+  arec : pAutoGenRec;
+Begin
+  if lowercase(vartostr(map.NodeValue)) = 'primaryrecordid' Then Begin
+   fieldvalue := floattostr(parentprimaryid);
+   IdValue := 0;
+  end else if lowercase(vartostr(map.NodeValue)) = 'sourcerecordid' Then Begin
+   Fieldvalue := 'sourcerecordid';
+   k := Storedata.GetFieldIndex(fieldname, rowno);
+   if k <> -1 then begin
+     if pFieldRec(Storedata.fieldlist[k]).OldValue <> '' then
+       FieldValue := pFieldRec(Storedata.fieldlist[k]).OldValue;
+   end;
+   IdValue := 0;
+  end else if lowercase(vartostr(map.NodeValue)) = 'parentrecordid' Then Begin
+   Fieldvalue := 'parentrecordid';
+   IdValue := 0;
+  end else if map.Attributes['type']='field' Then Begin
+    FieldValue := GetFieldValueFromParent(vartostr(map.NodeValue), RowNo);
+    if (struct.axprovider.dbm.gf.PostAutoGen) and (ParentTransid <> '') then
+    begin
+      if IsParentAutoRecFound(ParentTransid,ParentFldName) then
+      begin
+        New(arec);
+        arec.Transid := Storedata.TransType;
+        arec.FieldName := FieldName;
+        arec.RType := 'dep';
+        arec.ParentTransid := ParentTransid;
+        arec.ParentFldName := ParentFldName;
+        arec.Rowno := 1;
+        arec.Schema := Storedata.CompanyName;
+        arec.TableName := fld.Tablename;
+        aRec.ParentList := nil;
+        aRec.RecordidUpdated := False;
+        struct.axprovider.dbm.gf.AutoGenData.Add(arec);
+        AddDepsToAutoGenList(Fieldname);
+      end;
+    end;
+  End Else Begin
+    FieldValue := vartostr(map.NodeValue);
+    IdValue := struct.axprovider.dbm.gf.strtofloatz(vartostr(map.attributes['idvalue']));
+  End;
+End;
+
+Function TProvideLink.GetIdValueFromSD(FieldName: String; RowNo: integer):  extended;
+Var
+  k: integer;
+Begin
+  k := StoreData.GetFieldIndex(FieldName, RowNo);
+  If k >= 0 Then Result := pFieldRec(StoreData.FieldList[k]).IdValue Else
+    Result := 0;
+End;
+
+Function TProvideLink.GetValueFromSD(FieldName: String; RowNo: integer): String;
+Var
+  k: integer;
+Begin
+  k := StoreData.GetFieldIndex(FieldName, RowNo);
+  LastDataType := 'c';
+  If k >= 0 Then Begin
+    LastDataType := Char(pFieldRec(StoreData.FieldList[k]).DataType[1]);
+    Result := pFieldRec(StoreData.FieldList[k]).Value
+  End Else Result := '';
+End;
+
+Procedure TProvideLink.LinkDetailToSD;
+Var GroupField: String;
+  k, i,fno, rno:integer;
+Begin
+  FieldsAdded.Clear;
+  RowsAdded.Clear;
+  InvalidRows.Clear;
+  RowExists:=false;
+{  For i := 0 To StoreDataRec.MaxRowList.count-1 Do
+    StoreDataRec.MaxRowList[i] := inttostr(Storedatarec.StoreData.GetRowCount(i+1));
+}
+  for k:=0 to storedatarec.node.ChildNodes.Count-1 do begin
+    map:=storedatarec.node.ChildNodes[k];
+    fld := StoreData.structdef.GetField(map.nodename);
+    If Not assigned(fld) Then
+      Raise EDatabaseError.Create('Invalid field ' + map.nodename + ' in link to ' + StoreDataRec.TargetTransId);
+    If map.attributes['trow'] > 0 Then Begin
+      FillSpecificRow;
+    End Else Begin
+      If WorkOnQuery Then
+        Raise EDataBaseError.Create('Feature not implemented when posting from Query');
+      GroupField := lowercase(map.Attributes['group']);
+      If GroupField <> '' Then
+        FillGroupedGridToGrid
+      Else
+        FillGridToGrid;
+    End;
+  End;
+  for i:=0 to StoreDataRec.MaxRowList.count-1 do begin
+   if uppercase(StoredataRec.Struct.gridstring[i+1]) = 'T' then
+    TrimExtraRowsInTarget(i+1, StrToInt(StoreDataRec.MaxRowList[i]), StoreData.GetRowCount(i+1));
+  end;
+  SetParentRows;
+End;
+
+Procedure TProvideLink.FillSpecificRow;
+Var
+  FieldName, DataType, SaveTableName, s, fv: String;
+  FrameNo, fpos, prow, x, i: integer;
+  SourceKey, Validity: Boolean;
+Begin
+  FieldName := fld.FieldName;
+  DataType := fld.DataType;
+  SaveTableName := fld.Tablename;
+  FrameNo := fld.FrameNo;
+  SourceKey := fld.SourceKey;
+  If (map.Attributes['type'] = 'field') And (map.Attributes['srow'] = 0) Then begin
+    GetFieldValue(map.NodeName, ParentRowNo);
+    Validity := ValidRow(ParentRowNo);
+  end Else begin
+    GetFieldValue(map.NodeName, map.Attributes['srow']);
+    if map.Attributes['srow'] <> 0 then
+     Validity := ValidRow(map.Attributes['srow'])
+    else
+     Validity := ValidRow(ParentRowNo)
+  end;
+  if (datatype = 'n') and (idvalue > 0) then begin
+    FieldValue := FloatToStr(Idvalue);
+    IdValue := 0;
+  end;
+
+  If not fld.SourceKey Then
+    IdValue := 0
+  Else If map.Attributes['id']='True' Then Begin
+    IdValue := StrToFloat(FieldValue);
+    FieldValue := '';
+  End;
+
+  x := map.Attributes['trow'];
+  for i:=1 to map.Attributes['trow']-1 do begin
+    s := struct.axprovider.dbm.gf.pad(IntToStr(Frameno),2,' ') + struct.axprovider.dbm.gf.pad(IntToStr(i),2,' ');
+    if invalidrows.indexof(s) >= 0 then dec(x);
+  end;
+
+  fpos := FieldsAdded.IndexOf(fieldname);
+  If fpos = -1 Then Begin
+    FieldsAdded.Add(fieldname);
+    RowsAdded.add('0');
+    fpos := FieldsAdded.count - 1;
+  End;
+
+  if not validity then begin
+   s := struct.axprovider.dbm.gf.pad(IntToStr(Frameno),2,' ') + struct.axprovider.dbm.gf.pad(map.Attributes['trow'],2,' ');
+   if invalidrows.indexof(s) = -1 then begin
+     Invalidrows.add(s);
+     if rowexists then
+       storedata.deleterow(Frameno, x);
+   end;
+   exit;
+  end;
+
+  If StrToInt(StoreDataRec.MaxRowList[FrameNo - 1]) < x Then
+    StoreDataRec.MaxRowList[FrameNo - 1] := IntToStr(x);
+  RowsAdded[fpos] := IntToStr(x);
+
+  if (fld.ModeofEntry='autogenerate') then begin
+    fv := StoreData.GetFieldValue(FieldName,1);
+    if fv <> '' then FieldValue := fv;
+  end;
+
+  StoreData.SetFieldValue(FieldName, DataType, SaveTableName, FieldValue, '', x, IdValue, 0, FrameNo, 0, SourceKey);
+  StoreDataRec.Validate.Parser.RegisterVar(FieldName,DataType[1],FieldValue);
+  struct.axprovider.dbm.gf.DoDebug.msg('Mapped '+FieldName+' Row = '+Inttostr(x)+' value = '+FieldValue + ' idvalue '+floattostr(idvalue));
+End;
+
+Procedure TProvideLink.FillGridToGrid;
+Var
+  FieldName, DataType, SaveTableName, GroupFieldValue: String;
+  FrameNo, ColNo, i, r, MaxRow, k, fpos, fno, prow: integer;
+  SourceKey, TrimRows: Boolean;
+  SD: TStoreData;
+Begin
+  FieldName := fld.FieldName;
+  DataType := fld.DataType;
+  SaveTableName := fld.Tablename;
+  FrameNo := fld.FrameNo;
+  SourceKey := fld.SourceKey;
+  If lowercase(StoreDataRec.SourceTransId) = lowercase(fTransid) Then Begin
+    SD := ParentStoreData;
+  End Else Begin
+    k := StoreDataRec.SourceIndex;
+    SD := pStoreDataRec(StoreDataList[k]).StoreData;
+  End;
+  FNo := GetSourceFrameNo;
+  MaxRow := SD.GetRowCount(FNo);
+  fpos := FieldsAdded.IndexOf(fieldname);
+  If fpos = -1 Then Begin
+    FieldsAdded.Add(fieldname);
+    RowsAdded.add('0');
+    fpos := FieldsAdded.count - 1;
+  End;
+  r := StrToInt(RowsAdded[fpos]);
+  For i := 1 To MaxRow Do Begin
+    if not ValidRow(i) then continue;
+    GetFieldValue(map.NodeName, i);
+    if (datatype = 'n') and (idvalue > 0) then begin
+      FieldValue := FloatToStr(Idvalue);
+      IdValue := 0;
+    end;
+    If not fld.sourcekey Then
+      IdValue := 0
+    Else If map.Attributes['id']='True'
+      Then Begin
+      IdValue := StrToFloat(FieldValue);
+      FieldValue := '';
+    End;
+    inc(r);
+    StoreData.SetFieldValue(FieldName, DataType, SaveTableName, FieldValue, '',
+      r, IdValue, 0, FrameNo, 0, SourceKey);
+    StoreDataRec.Validate.Parser.RegisterVar(FieldName,DataType[1],FieldValue);
+    struct.axprovider.dbm.gf.DoDebug.msg('Mapped '+FieldName+' Row = '+Inttostr(r)+' value = '+FieldValue + ' idvalue '+floattostr(idvalue));
+    If StrToInt(StoreDataRec.MaxRowList[FrameNo - 1]) < r Then
+      StoreDataRec.MaxRowList[FrameNo - 1] := IntToStr(r);
+  End;
+  RowsAdded[fpos] := inttostr(r);
+End;
+
+Procedure TprovideLink.FillGroupedGridToGrid;
+Var
+  FieldName, DataType, SaveTableName, GroupFieldValue: String;
+  FrameNo, ColNo, i, r, MaxRow, k, fpos, fno, prow : integer;
+  SourceKey, TrimRows: Boolean;
+  SD: TStoreData;
+Begin
+  FieldName := fld.FieldName;
+  DataType := fld.DataType;
+  SaveTableName := fld.Tablename;
+  FrameNo := fld.FrameNo;
+  SourceKey := fld.SourceKey;
+  If lowercase(StoreDataRec.SourceTransId) = lowercase(fTransid) Then Begin
+    SD := ParentStoreData;
+  End Else Begin
+    k := StoreDataRec.SourceIndex;
+    SD := pStoreDataRec(StoreDataList[k]).StoreData;
+  End;
+  fno := GetSourceFrameNo;
+  MaxRow := SD.GetRowCount(FNo);
+  GroupFieldValues.clear;
+  FieldValueList.clear;
+  IdValueList.Clear;
+  For i := 1 To MaxRow Do Begin
+
+    if not validrow(i) then continue;
+
+    GetFieldValue(map.nodename, i);
+    GroupFieldValue:=GetFieldValueFromParent(map.Attributes['group'], i);
+    k := GroupFieldValues.IndexOf(GroupFieldValue);
+    If k = -1 Then Begin
+      GroupFieldValues.Add(GroupFieldValue);
+      If DataType = 'n' Then FieldValueList.Add('0') Else
+        FieldValueList.Add('');
+      IdValueList.Add('0');
+      k := GroupFieldValues.Count - 1;
+    End;
+    GetFieldValue(map.NodeName, i);
+    If not fld.Sourcekey Then
+      IdValue := 0
+    Else If map.Attributes['id']='True' Then Begin
+      IdValue := StrTofloat(FieldValue);
+      FieldValue := '';
+    End;
+    If (DataType = 'n') And (FieldValue <> '') Then
+      FieldValueList[k] := FloatToStr(StrToFloat(FieldValueList[k]) +
+        StrToFloat(FieldValue))
+    Else If FieldValueList[k] = '' Then
+      FieldValueList[k] := FieldValue;
+    IdValueList[k] := FloatToStr(IdValue);
+  End;
+
+  fpos := FieldsAdded.IndexOf(fieldname);
+  If fpos = -1 Then Begin
+    FieldsAdded.Add(fieldname);
+    RowsAdded.add('0');
+    fpos := FieldsAdded.count - 1;
+  End;
+  r := StrToInt(RowsAdded[fpos]);
+
+  For i := 0 To FieldValueList.count - 1 Do Begin
+    inc(r);
+    StoreData.SetFieldValue(FieldName, DataType, SaveTableName,
+      FieldValueList[i], '', r, StrToFloat(IdValueList[i]), 0, FrameNo, 0,
+      SourceKey);
+    StoreDataRec.Validate.Parser.RegisterVar(FieldName,DataType[1],FieldValueList[i]);
+    struct.axprovider.dbm.gf.DoDebug.msg('Mapped '+FieldName+' Row = '+Inttostr(r)+' value = '+FieldValueList[i] + ' idvalue '+idvaluelist[i]);
+  End;
+
+  RowsAdded[fpos] := inttostr(r);
+
+  If StrToInt(StoreDataRec.MaxRowList[FrameNo - 1]) < r Then
+    StoreDataRec.MaxRowList[FrameNo - 1] := IntToStr(r);
+End;
+
+Function TProvideLink.GetSourceFrameNo:integer;
+var k, fno, i, j : integer;
+    sd : TStoreData;
+    sfname, tfname : String;
+    fpa, fpb : pfld;
+    na : ixmlnode;
+begin
+  result := 0;
+  If StoreDataRec.SourceTransId = fTransId Then Begin
+    SD := ParentStoreData;
+  End Else Begin
+    k := StoreDataRec.SourceIndex;
+    If k = -1 Then exit;
+    sd := pStoreDataRec(StoreDataList[k]).StoreData;
+  End;
+
+  fno := fld.FrameNo;
+  for i:=0 to storedatarec.node.ChildNodes.Count-1 do begin
+    na:=storedatarec.node.ChildNodes[i];
+    if (vartostr(na.attributes['type']) = 'field') and (na.Attributes['trow']=0) then begin
+      tfname := lowercase(na.NodeName);
+      sfname := lowercase(vartostr(na.NodeValue));
+      fpa := StoreDataRec.StoreData.structdef.GetField(tfname);
+      if fpa.FrameNo = fno then begin
+        fpb := sd.structdef.GetField(sfname);
+        if assigned(fpb) and (fpb.AsGrid) then begin
+          result := fpb.FrameNo;
+          break;
+        end else begin
+          for j := 0 to sd.structdef.frames.Count-1 do begin
+            if lowercase(sfname) = lowercase(trim(pfrm(sd.structdef.frames[j]).TableName)+'id') then begin
+              result := pfrm(sd.structdef.frames[j]).FrameNo;
+              break;
+            end;
+          end;
+        end;
+      end;
+    end;
+  end;
+  if assigned(fpb) and (result = 0) then result := fpb.FrameNo;
+end;
+
+Function TProvideLink.ValidRow(RowNo:integer):boolean;
+var RowControlField, fv: String;
+    fid : extended;
+begin
+ Result := true;
+ RowControlField := map.Attributes['control'];
+ if RowControlField = '' then exit;
+ fid := IdValue;
+ if not IsFieldExists(RowControlField, Rowno) then
+  RowNo := 1;
+ fv := GetFieldValueFromParent(RowControlField, RowNo);
+ fv:=lowercase(fv);
+ Result := fv = 't';
+ IdValue := fid;
+ rowexists:=(lowercase(oldfieldvalue)='t') and  (fv<>'t');
+end;
+
+Function TProvideLink.GetParentRowNo(IdField, IdValue:String; ParentFrame :integer):integer;
+var j,rcount :integer;
+    v : String;
+begin
+  result := 0;
+  rcount := storedata.GetRowCount(ParentFrame);
+  for j:=1 to rcount do begin
+    v := storedata.getfieldvalue(idField, j);
+    if v = idvalue then begin
+      result := j;
+      break;
+    end;
+  end;
+end;
+
+procedure TProvideLink.SetParentRows;
+var i, j, rcount, frameno, PRow, k, pframe, x:integer;
+    idfield, v : String;
+    sd : TStoreData;
+begin
+{  for i:=0 to storedata.subframes.count-1 do begin
+    frameno := strtoint(storedata.subframes[i]);
+    IdField := storedata.subframesidfields[i];
+    pframe := StrToint(Storedata.subframesparent[i]);
+
+    If StoreDataRec.SourceTransId = fTransId Then Begin
+      SD := ParentStoreData;
+    End Else Begin
+      x := GetSourceIndex(StoreDataRec.SourceTransid);
+      If x = -1 Then exit;
+      sd := pStoreDataRec(StoreDataList[x]).StoreData;
+    End;
+    if sd.GetFieldFirstIndex('sub_'+idfield) < 0 then continue;
+
+    rcount := storedata.GetRowCount(FrameNo);
+    for j:=1 to rcount do begin
+      v := GetFieldValueFromParent('sub_'+idfield,j);
+      PRow := GetParentRowNo(IdField, v, pframe);
+      for k :=0 to StoreData.FieldList.count-1 do begin
+        if (pFieldRec(StoreData.FieldList[k]).FrameNo = FrameNo) and (pFieldRec(StoreData.FieldList[k]).RowNo = j) then
+          pFieldRec(StoreData.FieldList[k]).ParentRowNo := Prow;
+      end;
+    end;
+  end;}
+end;
+
+Function TProvideLink.GetFieldValueFromParent(FieldName: String; RowNo:
+  Integer): String;
+Var
+  kf, k,rno, j: integer;
+  sd: TStoreData;
+  tfld : pFld;
+Begin
+  Result := '';
+  IdValue := 0;
+  OldFieldValue := '';
+  OldIdValue := 0;
+  ParentTransid := '';
+  ParentFldName := '';
+  If WorkOnQuery Then Begin
+    Result := ProviderQuery.Fieldbyname(FieldName).AsString;
+    exit;
+  End;
+  If StoreDataRec.SourceTransId = fTransId Then Begin
+    SD := ParentStoreData;
+  End Else Begin
+    k := StoreDataRec.SourceIndex;
+    If k = -1 Then exit;
+    sd := pStoreDataRec(StoreDataList[k]).StoreData;
+  End;
+  tfld := sd.structdef.GetField(FieldName);
+  if assigned(tfld) then begin
+    if  tfld.AsGrid  then begin
+      rno := RowNo;
+      if (StoreDataRec.SourcePopIndex > -1) and (tfld.FrameNo = StoreDataRec.PopParentFrameNo) then begin
+         rno := GetParentActiveRow(sd,RowNo,StoreDataRec.SourcePopIndex);
+         if rno = -1 then rno := RowNo;
+      end;
+      kf := Sd.GetFieldIndex(FieldName, rno)
+    end else
+      kf := Sd.GetFieldIndex(FieldName, 1);
+  end else begin
+    for j := 0 to sd.structdef.frames.Count-1 do begin
+      if lowercase(FieldName) = lowercase(trim(pfrm(sd.structdef.frames[j]).TableName)+'id') then begin
+        if pfrm(sd.structdef.frames[j]).AsGrid then begin
+          rno := RowNo;
+          if (StoreDataRec.SourcePopIndex > -1) and (pfrm(sd.structdef.frames[j]).FrameNo = StoreDataRec.PopParentFrameNo) then begin
+             rno := GetParentActiveRow(sd,RowNo,StoreDataRec.SourcePopIndex);
+             if rno = -1 then rno := RowNo;
+          end;
+        end else
+          rno := 1;
+        Result := FloatToStr(Sd.GetParentDocid(pfrm(sd.structdef.frames[j]).FrameNo,rno));
+        kf := -1;
+        break;
+      end;
+    end;
+  end;
+
+  If kf >= 0 Then Begin
+    Result := pFieldRec(Sd.FieldList[kf]).Value;
+    IdValue := pFieldRec(Sd.FieldList[kf]).IdValue;
+    OldFieldValue := pFieldRec(Sd.FieldList[kf]).OldValue;
+    OldIdValue := pFieldRec(Sd.FieldList[kf]).OldIdValue;
+    tfld := sd.structdef.GetField(FieldName);
+    if (sd.structdef.axprovider.dbm.gf.PostAutoGen) and (assigned(tfld)) and (tfld.ModeofEntry = 'autogenerate') then
+    begin
+      ParentTransid := sd.TransType;
+      ParentFldName := FieldName;
+    end;
+  End;
+End;
+
+Function TProvideLink.IsFieldExists(FieldName:String;Rowno:integer):Boolean;
+Var kf, k: integer;
+    sd: TStoreData;
+begin
+  Result := false;
+  If WorkOnQuery Then Begin
+    exit;
+  End;
+  If StoreDataRec.SourceTransId = fTransId Then Begin
+    SD := ParentStoreData;
+  End Else Begin
+    k := StoreDataRec.SourceIndex;
+    If k = -1 Then exit;
+    sd := pStoreDataRec(StoreDataList[k]).StoreData;
+  End;
+  kf := Sd.GetFieldIndex(FieldName, RowNo);
+  Result := (kf >= 0);
+end;
+
+Procedure TProvideLink.TrimExtraRowsInTarget(FrameNo, ParentCount, Count: Integer);
+Begin
+  if (StoreData.SubFrames.IndexOf(IntToStr(FrameNo)) >= 0) and (pos(','+StoreData.TransType+',', ShowSubForm) > 0) then
+    exit;
+  While count > ParentCount Do Begin
+    StoreData.DeleteRow(FrameNo, Count);
+    dec(count);
+  End;
+End;
+
+Function TProvideLink.DeleteLinkTrans(ParentTableId: Extended): boolean;
+Var
+  i, k, j, MaxRow: integer;
+  SD: TStoreData;
+  firsttime : boolean;
+Begin
+    Result := false;
+    ParentRecordId := ParentTableId;
+    For i := 0 To StoreDataList.count - 1 Do Begin
+      StoreDataRec := StoreDataList[i];
+      StoreData := StoreDataRec.StoreData;
+      If storedatarec.SourceMapName='' Then Begin
+        SD := ParentStoreData;
+      End Else Begin
+        continue;
+      End;
+
+      If StoreDataRec.SourceFrame > 0 Then Begin
+        If Not DeleteLinkForDeletedLines(i) Then exit;
+        MaxRow := SD.GetRowCount(StoreDataRec.SourceFrame + 1);
+        For j := 1 To MaxRow Do Begin
+          If StoreDataRec.CompanyFieldName <> '' Then Begin
+            FieldValue := GetFieldValueFromParent(StoreDataRec.CompanyFieldName,
+              j);
+            If OldFieldValue = '' Then
+              GetFieldValueFromParent(StoreDataRec.CompanyFieldName, 1);
+            StoreData.CompanyName := OldFieldValue;
+          End;
+
+          ParentDocId := GetRecordId(SD, StoreDataRec.SourceFrame + 1, j);
+
+          If Not DeleteTrans Then exit;
+          if not deleteChildTrans(j) then exit;
+        End;
+      End Else Begin
+        If StoreDataRec.CompanyFieldName <> '' Then Begin
+          FieldValue := GetFieldValueFromParent(StoreDataRec.CompanyFieldName, 1);
+          StoreData.CompanyName := FieldValue;     //StoreData.CompanyName := OldFieldValue; by dhurga
+        End;
+
+        ParentDocId := SD.LastSavedRecordId;
+        If Not DeleteTrans Then exit;
+        if not deleteChildTrans(1) then exit;
+      End;
+      inc(Struct.axprovider.dbm.gf.TransCheckCount);
+      Struct.axprovider.InsertIntoTransCheck;
+    End;
+
+    For i := 0 To StoreDataList.count - 1 Do Begin
+      pStoreDataRec(StoreDataList[i]).StoreData.EndSave;
+    End;
+    Result := true;
+End;
+
+Function TProvideLink.DeleteTrans: boolean;
+Var
+  k: integer;
+  locked,flag: boolean;
+Begin
+  try
+    Result := true;
+    StoreData.ChildTrans := true;
+    if struct.axprovider.dbm.Connection.dbType<>'mysql' then
+    begin
+      flag := struct.axprovider.dbm.InTransaction;
+      struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\DeleteTrans\checking InTransaction.');
+      if not flag then
+      begin
+        struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\DeleteTrans\ InTransaction - False.');
+        struct.axprovider.dbm.gf.DoDebug.msg('uProvideLink\DeleteTrans\ Database connection lost. Please resave the transaction.');
+        struct.axprovider.dbm.gf.Db_Conn_Lost := true;
+        raise EDatabaseerror.create('Error in posting data. Please resave the transaction.');
+      end;
+    end;
+    StoreData.LoadChildTrans(StoreDataRec.MapName, ParentDocId);
+    StoreDataRec.Validate.Parser.RegisterVar('ChildDoc', 'c', StoreData.ChildDoc);
+    StoreDataRec.Validate.Parser.RegisterVar('recordid', 'n', FloatToStr(StoreData.LastSavedRecordId));
+    If (StoreData.EntryDocLoaded) and (not Storedata.Cancelled) Then Begin
+      StoreDataRec.Validate.Parser.RegisterVar('onsave', 'c', 's');
+      StoreDataRec.Validate.Validation := false;
+      Storedatarec.Validate.Loading:=true;
+      StoreDataRec.Validate.FillAndValidate(false);
+      StoreDataRec.Validate.Validation := true;
+      StoreDataRec.Validate.Parser.RegisterVar('onsave', 'c', 'f');
+      flag := struct.axprovider.dbm.InTransaction;
+      if not flag then
+      begin
+        if CancelTrans then
+          raise EDatabaseerror.create('Database connection lost. Please cancel the transaction once again.')
+        else
+          raise EDatabaseerror.create('Database connection lost. Please delete the transaction once again.');
+      end;
+      if CancelTrans then begin
+        ExecuteAction('Before cancel transaction','');
+      end else begin
+        ExecuteAction('Before delete transaction','');
+      end;
+      If CancelTrans Then
+        StoreData.CancelTrans(CancelRemarks)
+      Else
+        StoreData.DeleteTrans(0);
+      if CancelTrans then begin
+        DoEvalExprSet('aftercancel');
+        ExecuteAction('After cancel transaction','');
+      end else begin
+        DoEvalExprSet('afterdelete');
+        ExecuteAction('After delete transaction','');
+      end;
+    End;
+  Except on E:Exception do
+    begin
+      Raise exception.Create(E.Message);
+    end;
+  end;
+End;
+
+Function TProvideLink.GetFieldOfFrame(SD: TStoreData; FrameNo: Integer): String;
+Var
+  i: integer;
+Begin
+  Result := '';
+  For i := 0 To sd.fieldList.count - 1 Do Begin
+    If pFieldRec(sd.fieldlist[i]).FrameNo = FrameNo Then Begin
+      result := pFieldRec(sd.fieldlist[i]).FieldName;
+      break;
+    End;
+  End;
+End;
+
+Function TProvideLink.DeleteLinkForDeletedLines(sdInd:integer): boolean;
+Var
+  SD: TStoreData;
+  k, i: integer;
+  r : Extended;
+Begin
+  Result := false;
+  If lowercase(StoreDataRec.SourceTransId) = lowercase(fTransid) Then
+    SD := ParentStoreData
+  Else Begin
+    k := StoreDataRec.SourceIndex;
+    SD := pStoreDataRec(StoreDataList[k]).StoreData;
+  End;
+  r := 0;
+  For i := 0 To SD.FieldList.Count - 1 Do Begin
+    If pFieldRec(SD.FieldList[i]).FrameNo = StoreDataRec.SourceFrame + 1 Then Begin
+      If (pFieldRec(SD.FieldList[i]).RowNo < 0) And
+        (pFieldRec(SD.FieldList[i]).RecordId <> r) And
+        (pFieldRec(SD.FieldList[i]).RecordId <> 0) Then Begin
+        r := pFieldRec(SD.FieldList[i]).RecordId;
+        ParentDocId := r;
+        If Not DeleteTrans Then exit;
+        if Not DeleteChildTrans(pFieldRec(SD.FieldList[i]).OldRow) Then Exit;
+      End;
+    End;
+  End;
+  Result := true;
+End;
+
+Function TProvideLink.GetRecordId(SD: TStoreData; FrameNo, RowNo: integer):Extended;
+Var
+  i: integer;
+Begin
+  Result := 0;
+  For i := 0 To SD.RecordIdList.Count - 1 Do Begin
+    If (StrToInt(trim(Copy(SD.RecordIdList[i], 1, 3))) = FrameNo) And
+      (StrToInt(trim(Copy(SD.RecordIdList[i], 4, 5))) = RowNo) Then Begin
+      Result := StrToFloat(trim(Copy(SD.RecordIdList[i], 9, struct.axprovider.dbm.gf.MaxRecid)));
+      break;
+    End;
+  End;
+End;
+
+Function TProvideLink.GetMapParentRecordId(SD: TStoreData; FrameNo, RowNo: integer):Extended;
+Var
+  i, prow, p, fno: integer;
+Begin
+  Result := 0;
+  p := Sd.SubFrames.IndexOf(IntToStr(FrameNo));
+  If p <> -1 Then FNo := StrToInt(sd.SubFramesParent[p]) Else exit;
+  prow := 0;
+  for i:=0 to sd.fieldlist.count-1 do begin
+    if (pFieldRec(sd.fieldlist[i]).frameno = frameno) and (pFieldRec(sd.fieldlist[i]).tablename <> '') and (pFieldRec(sd.fieldlist[i]).rowno = rowno) then begin
+      prow := pFieldRec(sd.fieldlist[i]).parentrowno;
+      break;
+    end;
+  end;
+  if prow = 0 then exit;
+  For i := 0 To SD.RecordIdList.Count - 1 Do Begin
+    If (StrToInt(trim(Copy(SD.RecordIdList[i], 1, 3))) = FNo) And
+      (StrToInt(trim(Copy(SD.RecordIdList[i], 4, 5))) = pRow) Then Begin
+      Result := StrToFloat(trim(Copy(SD.RecordIdList[i], 9, struct.axprovider.dbm.gf.MaxRecid)));
+      break;
+    End;
+  End;
+End;
+
+procedure TProvideLink.DoEvalExprSet(EventName : String);
+var p:integer;
+    s:String;
+begin
+ if StoreDatarec.Struct.ExprSetList.count = 0 then exit;
+ s := '{'+lowercase(trim(EventName))+'}';
+ p := StoreDatarec.Struct.ExprSetList.indexof(s);
+ if p = -1 then exit;
+ storedatarec.validate.parser.exprset := StoreDatarec.Struct.exprsetlist;
+ struct.axprovider.dbm.gf.DoDebug.msg('Evaluating - '+s);
+ storedatarec.validate.parser.evalexprset(p+1);
+end;
+
+Procedure TProvideLink.SetPosted(MapName:String; RecordId : Extended);
+var tabname : String;
+begin
+//sab start
+ tabname := uppercase(trim(StoreDataRec.SourceTransid)) + 'POSTED';
+ if StoreDataRec.UpdatePosted = 't' then begin
+   QCheck:=Struct.axprovider.dbm.GetXDS(QCheck);
+   QCheck.buffered := True;
+   QCheck.CDS.CommandText :='select * from '+tabname+' where mapname='+quotedstr(mapname)+' and recordid='+floattostr(recordid);
+   QCheck.open;
+   if QCheck.CDS.isempty then begin
+     PostedQ:=Struct.axprovider.dbm.GetXDS(PostedQ);
+     PostedQ.buffered := True;
+     PostedQ.Append(tabname);
+     PostedQ.Submit('mapname', mapname, 'c');
+     PostedQ.Submit('recordid', floattostr(recordid), 'n');
+     PostedQ.post;
+   end;
+   QCheck.close;
+//   QCheck.SQL.Clear;
+ end;
+end;
+
+Procedure TProvideLink.CanUpdatePosted(tabname:String);
+begin
+  QCheck:=Struct.axprovider.dbm.GetXDS(QCheck);
+  QCheck.buffered := True;
+  QCheck.CDS.CommandText :='select * from '+tabname+' where 1=2 ';
+  try
+  QCheck.Open;
+  QCheck.Close;
+  StoreDataRec.UpdatePosted := 't';
+  except on e:Exception do
+    begin
+      if assigned(struct) then  struct.axprovider.dbm.gf.DoDebug.Log(struct.AxProvider.dbm.gf.Axp_logstr+'\uProvideLink\CanUpdatePosted - '+e.Message);
+      StoreDataRec.UpdatePosted := 'f';
+    end;
+  end;
+  QCheck.close;
+end;
+
+procedure TProvideLink.CreateExprList(n:ixmlnode);
+var i : Integer;
+begin
+  StoreDataRec.Expr.Clear;
+  if not assigned(n) then exit;
+  for i := 0 to n.ChildNodes.Count-1 do begin
+    if (i = 0) then begin
+      if vartostr(n.ChildNodes[i].NodeValue) <>  '{onpostgenmap}' then
+        StoreDataRec.Expr.Add('{onpostgenmap}');
+    end;
+    StoreDataRec.Expr.Add(vartostr(n.ChildNodes[i].NodeValue));
+  end;
+end;
+
+procedure TProvideLink.OnFill(xmlStr:String);
+var fxml : ixmldocument;
+    fs : TFillStruct;
+begin
+  TRY
+    fxml := LoadXMLData(xmlStr);
+    fs := TFillStruct.Create;
+    fs.axp := StoreDataRec.Struct.axprovider;
+    fs.validate := StoreDataRec.Validate;
+    fs.StoreData := StoreDataRec.StoreData;
+    fs.NewTrans := not Modify;
+    fs.ActionNode := fxml.DocumentElement;
+    fs.Fill;
+    fs.Destroy;
+    fs := nil;
+    fxml := nil;
+  except on e:exception do
+    begin
+      if assigned(struct) then  struct.axprovider.dbm.gf.DoDebug.Log(struct.AxProvider.dbm.gf.Axp_logstr+'\uProvideLink\OnFill - '+e.Message);
+      fs.Destroy;
+      fs := nil;
+      fxml := nil;
+      raise exception.Create(e.message);
+    end;
+  end;
+end;
+
+function TProvideLink.ExecuteAction(Event,Element:String) : String ;
+var i,j : Integer;
+    eRec : pEventRec;
+    anode,pnode : ixmlnode;
+    sl : TStringList;
+begin
+  result := '';
+  for i := 0 to EventList.Count-1 do begin
+    eRec := pEventRec(EventList[i]);
+    if (lowercase(eRec.Event) = lowercase(Event)) then begin
+      if Element <> '' then begin
+        if lowercase(eRec.Element) <> lowercase(Element) then continue;
+      end;
+      anode := actnode.ChildNodes.FindNode(eRec.Action);
+      if (anode = nil) or (anode.childnodes.count = 0) then break;
+      pnode := anode.ChildNodes[0];
+      if pnode.ChildNodes.count = 0 then break;
+      if ((vartostr(pnode.Attributes['op']) = '5')) and
+      ((lowercase(vartostr(pnode.Attributes['task'])) = 'user defined task') or
+      (lowercase(vartostr(pnode.Attributes['task'])) = 'scripts'))then begin
+        pnode := pnode.childNodes[0];
+        if pnode.ChildNodes.count = 0 then break;
+        pnode := pnode.ChildNodes[0];
+        try
+          if assigned(BeforeEventProc) then BeforeEventProc(StoreDataRec.Validate);
+          sl := TStringList.Create;
+          for j := 0 to pnode.ChildNodes.Count-1 do
+            sl.Add(vartostr(pnode.ChildNodes[j].NodeValue));
+          StoreDataRec.Validate.Parser.OnSQLPost := SQLPost;
+          StoreDataRec.Validate.Parser.ExprSet := sl;
+          StoreDataRec.Validate.Parser.EvalExprSet(0);
+        finally
+          if assigned(sl) then
+          begin
+            sl.Clear;
+            FreeAndNil(sl);
+          end;
+          if assigned(AfterEventProc) then AfterEventProc;
+        end;
+        break;
+      end else break;
+    end;
+  end;
+  anode := nil;
+end;
+
+procedure TProvideLink.CreateEventList;
+var i : Integer;
+    x : ixmlnode;
+    eRec : pEventRec;
+begin
+  ActNode := storedatarec.Struct.XML.DocumentElement.ChildNodes.FindNode('actions');
+  for i := 0 to EventList.Count-1 do begin
+    Dispose(pEventRec(EventList[i]));
+  end;
+  EventList.Clear;
+  if not assigned(ActNode) then exit;
+  for i := 0 to ActNode.ChildNodes.Count-1 do begin
+    x := ActNode.ChildNodes[i];
+    if (vartostr(x.Attributes['apply']) = '') then continue;
+    New(eRec);
+    eRec.Event := vartostr(x.Attributes['apply']);
+    eRec.Element := vartostr(x.Attributes['applyon']);
+    eRec.Action := vartostr(x.NodeName);
+    EventList.Add(eRec);
+  end;
+end;
+
+procedure TProvideLink.InitGrid(FrameNo:integer);
+var i,r:integer;
+begin
+  if (frameno > StoreDataRec.Struct.frames.count) or (frameno < 1) then exit;
+  If (not pfrm(StoreDataRec.struct.frames[FrameNo-1]).AsGrid) Then exit;
+  r := StoreDataRec.storedata.GetRowCount(frameno);
+  for i:=1 to r do
+    StoreDataRec.StoreData.DeleteRow(frameno,1);
+end;
+
+Function TProvideLink.GetParentActiveRow(SD:TStoreData;RowNo,Popindex:Integer):Integer;
+var popgrid : pPopGrid;
+    s : String;
+    pfrmno,rc,i,j : Integer;
+    ValidRow : Boolean;
+    tfld : pFld;
+    ParentList : TStringList;
+begin
+  result := -1;
+  popgrid := pPopgrid(sd.structdef.popgrids[popindex]);
+  s := popgrid.Parent;
+  pfrmno := StrToInt(copy(s,3,3));
+  ParentList := TStringList.create;
+  GetParentValue(SD,popgrid.FrameNo,RowNo,popgrid.ParentField,ParentList);
+  rc := SD.GetRowCount(pfrmno);
+  for i := 1 to rc do begin
+    ValidRow := False;
+    for j := 0 to ParentList.Count - 1 do begin
+      tfld := SD.structdef.GetField(ParentList.Names[j]);
+      if tfld.DataType = 'n' then begin
+        if (SD.GetFieldValue(ParentList.Names[j],i)='') or (strtofloat(SD.GetFieldValue(ParentList.Names[j],i)) <> strtofloat(ParentList.ValueFromIndex[j])) then begin
+          ValidRow := False;
+          Break;
+        end else ValidRow := True;
+      end else begin
+        if SD.GetFieldValue(ParentList.Names[j],i) <> ParentList.ValueFromIndex[j] then begin
+          ValidRow := False;
+          Break;
+        end else ValidRow := True;
+      end;
+    end;
+    if ValidRow then begin
+      result := i;
+      break;
+    end;
+  end;
+  ParentList.Free; ParentList := nil;
+end;
+
+Procedure TProvideLink.GetParentValue(SD:TStoreData;frmno,rowno:integer;pFields:String;sList:TStrings);
+var pField,val,fname:String;
+    i : Integer;
+    tfld : pfld;
+begin
+  sList.Clear;
+  i := 1;
+  pField := Trim(struct.axprovider.dbm.gf.GetNthString(pFields,i));
+  while pField <> '' do begin
+    fname := 'sub'+trim(IntToStr(frmno))+'_'+pField;
+    tfld := sd.structdef.GetField(pField);
+    if tfld <> nil then
+      pField := tfld.FieldName;
+    val := sd.GetFieldValue(fname,RowNo);
+    sList.Add(pField+'='+val);
+    inc(i);
+    pField := Trim(struct.axprovider.dbm.gf.GetNthString(pFields,i));
+  end;
+end;
+
+Function TProvideLink.IsParentAutoRecFound(pTransid,pFldName:String):Boolean;
+var i : integer;
+    parec : pAutoGenRec;
+begin
+  result := False;
+  for i := 0 to struct.axprovider.dbm.gf.AutoGenData.Count - 1 do
+  begin
+    parec := pAutoGenRec(struct.axprovider.dbm.gf.AutoGenData[i]);
+    if (parec.Transid = pTransid) and (parec.FieldName = pFldName) then
+    begin
+      result := True;
+      break;
+    end;
+  end;
+end;
+
+Procedure TProvideLink.AddDepsToAutoGenList(FldName:String);
+var aFld, dFld : pFld;
+    i : integer;
+    arec : pAutoGenRec;
+begin
+  aFld := struct.GetField(Fldname);
+  if not assigned(aFld) then exit;
+  if assigned(aFld.deps) then
+  begin
+    for i := 0 to aFld.deps.Count - 1 do
+    begin
+      dFld := pFld(Struct.GetField(aFld.deps[i]));
+      if not assigned(dFld) then continue;
+      if (dFld.ModeofEntry = 'calculate') or ((dFld.ModeofEntry = 'accept') and (not assigned(dFld.QSelect)) and (dFld.Exprn > -1)) then begin
+        New(arec);
+        arec.Transid := Storedata.TransType;
+        arec.FieldName := dFld.FieldName;
+        arec.RType := 'refresh';
+        arec.ParentTransid := Storedata.TransType;
+        arec.ParentFldName := FldName;
+        arec.Rowno := 1;
+        arec.Schema := Storedata.CompanyName;
+        arec.TableName := dFld.Tablename;
+        aRec.ParentList := nil;
+        aRec.RecordidUpdated := False;
+        struct.axprovider.dbm.gf.AutoGenData.Add(arec);
+      end;
+    end;
+  end;
+end;
+
+Procedure TProvideLink.CloseRefreshQueries(sd:TStoreData);
+var i:integer;
+begin
+  for i:=0 to sd.structdef.flds.Count-1 do begin
+    if not assigned(pfld(sd.structdef.flds[i]).QSelect) then continue;
+    if pfld(sd.structdef.flds[i]).refresh then begin
+      pfld(sd.structdef.flds[i]).QSelect.Close;
+    end;
+  end;
+end;
+
+Procedure TProvideLink.ResetMaxRowList(SdRec:pStoreDataRec);
+var i : integer;
+begin
+  for i:=0 to SdRec.MaxRowList.count-1 do
+    SdRec.MaxRowList[i] :='0';
+end;
+
+Function TProvideLink.SaveLinkTransForRepost(ParentTableId: Extended): boolean;
+Var
+  i, j, k, MaxRow: integer;
+  SD: TStoreData;
+  firsttime : Boolean;
+Begin
+    struct.axprovider.dbm.gf.DoDebug.msg('>>Executing genmaps');
+    result := false;
+    ParentRecordId := ParentTableId;
+    EndSave;
+    struct.axprovider.dbm.gf.FillAllFields := True;
+    For i := 0 To StoreDataList.count - 1 Do Begin
+      StoreDataRec := StoreDataList[i];
+      StoreData := StoreDataRec.StoreData;
+      if (GenMapsForRepost.Count > 0) and (GenMapsForRepost.IndexOf(storedatarec.MapName) = -1) then continue;
+      If storedatarec.SourceMapName='' Then Begin
+        SD := ParentStoreData;
+      End Else Begin
+        continue;
+      End;
+      If WorkOnQuery Then StoreDataRec.SourceFrame := -2;
+      ParentPrimaryId := SD.LastSavedRecordId;
+
+      If StoreDataRec.SourceFrame > 0 Then Begin
+        If Not DeleteLinkForDeletedLines(i) Then exit;
+        MaxRow := SD.GetRowCount(StoreDataRec.SourceFrame + 1);
+        For j := 1 To MaxRow Do Begin
+          struct.axprovider.dbm.gf.DoDebug.msg('>>Posting from '+StoreDataRec.Sourcetransid+' to '+Storedatarec.targettransid+' from row '+inttostr(j));
+          ParentDocId := GetRecordId(SD, StoreDataRec.SourceFrame + 1, j);
+          StoreData.MapParentRecordId := GetMapParentRecordId(SD, StoreDataRec.SourceFrame + 1, j);
+          if CallSaveTrans(j) then begin
+            if PostChildGenMaps then
+            begin
+              if StoreData.Deleted then
+                DeleteChildTrans(j)
+              else
+                PostChildTrans(j);
+            end;
+          end;
+        End;
+      End Else Begin
+        struct.axprovider.dbm.gf.DoDebug.msg('>>Posting from '+StoreDataRec.Sourcetransid+' to '+Storedatarec.targettransid);
+        If Not workonquery Then
+          ParentDocId := SD.LastSavedRecordId
+        Else
+          ParentDocid := ParentTableId;
+        StoreData.MapParentRecordId := 0;
+        if CallSaveTrans(1) then begin
+          if PostChildGenMaps then
+          begin
+            if StoreData.Deleted then
+              DeleteChildTrans(1)
+            else
+              PostChildTrans(1);
+          end;
+        end;
+      End;
+    End;
+    EndSave;
+    struct.axprovider.dbm.gf.FillAllFields := False;
+    Result := true;
+End;
+
+Function TProvideLink.DeleteLinkTransForRepost(ParentTableId: Extended): boolean;
+Var
+  i, k, j, MaxRow: integer;
+  SD: TStoreData;
+  firsttime : boolean;
+Begin
+    Result := false;
+    ParentRecordId := ParentTableId;
+    For i := 0 To StoreDataList.count - 1 Do Begin
+      StoreDataRec := StoreDataList[i];
+      StoreData := StoreDataRec.StoreData;
+      if (GenMapsForRepost.Count > 0) and (GenMapsForRepost.IndexOf(storedatarec.MapName) = -1) then continue;
+      If storedatarec.SourceMapName='' Then Begin
+        SD := ParentStoreData;
+      End Else Begin
+        continue;
+      End;
+
+      If StoreDataRec.SourceFrame > 0 Then Begin
+        If Not DeleteLinkForDeletedLines(i) Then exit;
+        MaxRow := SD.GetRowCount(StoreDataRec.SourceFrame + 1);
+        For j := 1 To MaxRow Do Begin
+          If StoreDataRec.CompanyFieldName <> '' Then Begin
+            FieldValue := GetFieldValueFromParent(StoreDataRec.CompanyFieldName,
+              j);
+            If OldFieldValue = '' Then
+              GetFieldValueFromParent(StoreDataRec.CompanyFieldName, 1);
+            StoreData.CompanyName := OldFieldValue;
+          End;
+
+          ParentDocId := GetRecordId(SD, StoreDataRec.SourceFrame + 1, j);
+
+          If Not DeleteTrans Then exit;
+          if PostChildGenMaps then
+          begin
+            if not deleteChildTrans(j) then exit;
+          end;
+        End;
+      End Else Begin
+        If StoreDataRec.CompanyFieldName <> '' Then Begin
+          FieldValue := GetFieldValueFromParent(StoreDataRec.CompanyFieldName, 1);
+          StoreData.CompanyName := FieldValue;     //StoreData.CompanyName := OldFieldValue; by dhurga
+        End;
+
+        ParentDocId := SD.LastSavedRecordId;
+        If Not DeleteTrans Then exit;
+        if PostChildGenMaps then
+        begin
+          if not deleteChildTrans(1) then exit;
+        end;
+      End;
+    End;
+
+    For i := 0 To StoreDataList.count - 1 Do Begin
+      pStoreDataRec(StoreDataList[i]).StoreData.EndSave;
+    End;
+    Result := true;
+End;
+
+
+End.
+

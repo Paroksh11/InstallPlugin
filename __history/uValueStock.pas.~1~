@@ -1,0 +1,1160 @@
+Unit uValueStock;
+{copied form ver 9.5\fix2}
+Interface
+Uses classes, SysUtils, dialogs, stdctrls, comctrls, db, forms,
+uGeneralFunctions, uXDS, uDbManager;
+
+Type
+  TValueStock = Class
+  Private
+    fQueryMode, ReadValues: boolean;
+    OldItemId, OldLocid: extended;
+    StockValue, stockplus, work: TXDS;
+    FIFOStartId: extended;
+    CancelStr : String;
+    csdec : Integer;
+
+    function CSRound(Value:Extended) : Extended;
+    Procedure SetQueryMode(QMode: Boolean);
+    Procedure OpenStockValue(itemid: extended; docdate: TDateTime); overload;
+    Procedure OpenStockValue(itemid, locid, CompId, Branchid, Batchid: extended; docdate: TDateTime); overload;
+    Procedure OpenStockValueL(itemid, locid: extended; docdate: TDateTime);
+    Procedure FIFOOpenStockValue(itemid: extended; docdate: TDateTime); overload;
+    Procedure FIFOOpenStockValue(itemid, locid, Compid, Branchid, Batchid: extended; docdate: TDateTime); overload;
+    Procedure FIFOOpenStockValueL(itemid, locid: extended; docdate: TDateTime);
+    Function GetWStockValue(Itemid, locid: extended; DocDate: TDateTime; IssueQty:Extended;pCompid, pBranchid, pBatchid:Extended): Extended;
+    Function GetNextWStockValue(Itemid: extended; DocDate: TDateTime; IssueQty:
+      Extended): Extended;
+    Function GetFStockValue(Itemid, locid: extended; DocDate: TDateTime; pCompid, pBranchid, pBatchid:Extended): Extended;
+    Function GetNextFStockValue(Itemid: extended; DocDate: TDateTime; IssueQty: Extended): Extended;
+    Function GetFIFOValue(itemid: extended; docdate: TDateTime; IssueQty: Extended): Extended;
+    Procedure GetNextFIFOBLock(itemid: extended; docdate: TDateTime; iqty: extended);
+    Procedure PrepareQuery(Q: TXDS; SQLText: String);
+    Function AssignQuery(QueryName: String): TXDS;
+    function GetFClStock(Itemid, locid: extended; DocDate: TDateTime; pCompid, pBranchid, pBatchid:Extended): Extended;
+    function GetWClStock(Itemid, locid: extended; DocDate: TDateTime; pCompid, pBranchid, pBatchid:Extended): Extended;
+    function GetWCostRate(Itemid, locid: extended; DocDate: TDateTime;
+      IssueQty: Extended; pCompid, pBranchid, pBatchid:Extended): Extended;
+    function GetFCostRate(Itemid, locid: extended; DocDate: TDateTime;
+      IssueQty: Extended; pCompid, pBranchid, pBatchid:Extended): Extended;
+    function GetFIFOIssueRate(itemid: extended; docdate: TDateTime;
+      IssueQty: Extended): Extended;
+    procedure GetNextFIFORate(itemid: extended; docdate: TDateTime;
+      Iqty: Extended);
+    Procedure CancelDefined;
+    function StockAvailable(Itemid, Locid: Extended; Docdate: TDateTime;
+      Porm: String; Qty: Extended): String;
+    function CheckDateChange(Itemid, Locid: Extended; Docdate, OldDate: TDateTime;
+      Porm: String; Qty, OldQty: Extended): String;
+
+  Public
+    dbm : TDBManager;
+    ParentDocId: Extended;
+    TotalValue, TotalQty, IQty, IssueRate: Extended;
+    Rec_StockQty, Rec_StockValue, Iss_StockQty, Iss_StockValue, Op_StockQty, Op_StockValue : Extended;
+    SRange, ERange, RValue : TStringList;
+    getcostrate_w_rebuild : Boolean;
+    w_costquery : String;
+
+    Constructor Create; Virtual;
+    Destructor Destroy; Override;
+    function CheckStock(pitemid, poldid, docdate, olddate, porm, pqty, poldqty, dec, plocid, poldlocid : String) : string;
+    Function GetCostRate(ItemId: extended; DocDate: TDateTime; IssueQty: Extended; VMethod, pLocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+    Function GetStockValue(ItemId: extended; DocDate: TDateTime; IssueQty:Extended; VMethod, pLocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+    Function GetClosingStock(ItemId: extended; DocDate: TDateTime; VMethod, pLocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+    Property QueryMode: Boolean Read fQueryMode Write SetQueryMode;
+    function GetStockAge(ItemId: Extended; DocDate: TDateTime; PeriodStr, pLocid:String): String;
+    procedure InitStock;
+  End;
+
+Implementation
+
+Constructor TValueStock.Create;
+Begin
+  Inherited;
+  ParentDocId := 0;
+  OldItemId := 0;
+  fQueryMode := false;
+  SRange := TStringList.create;
+  ERange := TStringList.create;
+  RValue := TStringList.create;
+  StockValue:=nil;stockplus:=nil;work:=nil;
+  getcostrate_w_rebuild := True;
+  w_costquery := '';
+End;
+
+Destructor TValueStock.Destroy;
+Begin
+  SRange.Clear;
+  ERange.Clear;
+  RValue.clear;
+  SRange.free;
+  ERange.free;
+  RValue.free;
+  if assigned(Stockvalue) then begin
+    Stockvalue.close;
+    stockvalue.free;
+  end;
+  if assigned(StockPlus) then begin
+    Stockplus.cds.close;
+    stockplus.free;
+  end;
+  if assigned(work) then begin
+    work.close;
+    work.free;
+  end;
+  Inherited;
+End;
+
+procedure TValueStock.InitStock;
+begin
+  OldItemId := 0;
+end;
+
+Procedure TValueStock.SetQueryMode(QMode: Boolean);
+Begin
+  fQueryMode := QMode;
+  OldItemId := 0;
+  ParentDocId := 0;
+End;
+
+{GetStockValue related functions}
+Function TValueStock.GetStockValue(ItemId: extended; DocDate: TDateTime; IssueQty:
+  Extended; VMethod, pLocid: String;pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+var res, locid:extended;
+Begin
+  Result := 0;
+  CancelDefined;
+  locid := dbm.gf.strtofloatz(plocid);
+  If Not assigned(StockValue) Then
+    StockValue := AssignQuery('StockValue' + floattostr(dbm.gf.gen_id('', 1)));
+  If lowercase(VMethod) = 'w' Then Begin
+    if not getcostrate_w_rebuild then begin
+       result := GetWStockValue(ItemId, Locid, DocDate-1, IssueQty,pCompid, pBranchid, pBatchid);
+    end else begin
+      If (itemid <> olditemid) or (locid <> oldlocid) Then
+        GetWStockValue(ItemId, Locid, DocDate-1, IssueQty,pCompid, pBranchid, pBatchid);
+      result := GetNextWStockValue(ItemId, DocDate, IssueQty);
+    end;
+    OldItemid := Itemid;
+    OldLocid := locid;
+  End;
+  If lowercase(VMethod) = 'f' Then Begin
+    If (itemid <> olditemid) or (locid <> oldlocid) Then
+      GetFStockValue(ItemId, Locid, DocDate-1,pCompid, pBranchid, pBatchid);
+    result := GetNextFStockValue(ItemId, DocDate, IssueQty);
+    OldItemid := Itemid;
+    oldlocid := locid;
+  End;
+End;
+
+Function TValueStock.GetWStockValue(Itemid, locid: extended; DocDate: TDateTime; IssueQty: Extended; pCompid, pBranchid, pBatchid:Extended): Extended;
+Begin
+  OpenStockValue(itemid, locid, pCompid, pBranchid, pBatchid, docdate);
+  if not getcostrate_w_rebuild then begin
+    if StockValue.CDS.RecordCount > 0 then begin
+      StockValue.CDS.First;
+      result := StockValue.CDS.fieldbyname('rate').asfloat*issueqty;
+    end else result := 0;
+    exit;
+  end;
+  TotalQty := 0;
+  TotalValue := 0;
+  IssueRate := 0;
+  Op_StockQty := 0;
+  Op_StockValue := 0;
+  StockValue.CDS.First;
+  While (Not StockValue.CDS.EOF) And (StockValue.CDS.fieldbyname('itemid').AsFloat =
+    itemid) And (StockValue.CDS.fieldbyname('docdate').asdatetime <= docdate) Do Begin
+    If lowercase(StockValue.CDS.fieldbyname('PlusOrMinus').asstring) = 'p' Then
+    Begin
+      TotalQty := TotalQty + StockValue.CDS.fieldbyname('Qty').Asfloat;
+      TotalValue := TotalValue + StockValue.CDS.fieldbyname('StockValue').asfloat;
+      If TotalQty <> 0 Then
+        IssueRate := TotalValue / TotalQty;
+    End Else Begin
+      If (StockValue.CDS.fieldbyname('SourceId').AsFloat = ParentDocId) And
+        (ParentDocId > 0) Then
+        IQty := IssueQty
+      Else
+        IQty := StockValue.CDS.fieldbyname('Qty').Asfloat;
+      TotalQty := TotalQty - IQty;
+      TotalValue := TotalValue - (IQty * IssueRate);
+    End;
+    Op_StockQty := TotalQty;
+    Op_StockValue := TotalValue;
+    StockValue.CDS.Next;
+    If (StockValue.CDS.fieldbyname('SourceId').AsFloat = ParentDocId) And
+      (ParentDocId > 0) Then break;
+  End;
+
+
+  Result := IssueQty * IssueRate;
+End;
+
+Function TValueStock.GetNextWStockValue(Itemid: extended; DocDate: TDateTime;
+  IssueQty: Extended): Extended;
+Begin
+  Result := IssueRate*IssueQty;
+  If (StockValue.CDS.Eof) Or (StockValue.CDS.fieldbyname('itemid').AsFloat <> itemid)
+    Then exit;
+  If lowercase(StockValue.CDS.fieldbyname('PlusOrMinus').asstring) = 'p' Then Begin
+    TotalQty := TotalQty + StockValue.CDS.fieldbyname('Qty').Asfloat;
+    TotalValue := TotalValue + StockValue.CDS.fieldbyname('StockValue').asfloat;
+    If TotalQty <> 0 Then IssueRate := abs(TotalValue) / abs(TotalQty) {else issuerate := 0};
+    Result := StockValue.CDS.fieldbyname('StockValue').asfloat;
+    //Result := IssueRate * IssueQty;
+  End Else Begin
+    TotalQty := TotalQty - StockValue.CDS.fieldbyname('Qty').Asfloat;
+    TotalValue := TotalValue - (StockValue.CDS.fieldbyname('Qty').Asfloat *
+      IssueRate);
+    Result := IssueRate * IssueQty;
+  End;
+  StockValue.CDS.next;
+End;
+
+Function TValueStock.GetFStockValue(Itemid, locid: extended; DocDate: TDateTime; pCompid, pBranchid, pBatchid:Extended): Extended;
+Begin
+  TotalQty := 0; TotalValue := 0; IssueRate := 0; FIFOStartId := 0;
+  ReadValues := false;
+
+//  if locid=0 then
+//    FIFOOpenStockValue(itemid, docdate)
+//  else
+//    FIFOOpenStockValueL(itemid, locid, docdate);
+  FIFOOpenStockValue(itemid, locid, pCompid, pBranchid, pBatchid, docdate);
+  TotalQty := 0;
+  TotalValue := 0;
+  IssueRate := 0;
+  Fifostartid := 0;
+  op_stockqty := 0;
+  op_stockValue := 0;
+  If lowercase(StockValue.CDS.FieldByName('plusOrMinus').AsString) = 'p' Then Begin
+    FIFOStartId := StockValue.CDS.FieldByName('StockValueId').AsFloat;
+    TotalQty := StockValue.CDS.FieldByName('Qty').Asfloat;
+    Totalvalue := StockValue.CDS.FieldByName('StockValue').Asfloat;
+    if TotalQty <> 0 then
+     Issuerate := abs(StockValue.CDS.FieldByName('StockValue').Asfloat) / abs(TotalQty)
+    {else
+     IssueRate := 0};
+  End;
+
+  While (Not StockValue.CDS.EOF) And (StockValue.CDS.Fieldbyname('itemid').AsFloat =
+    itemid) And (StockValue.CDS.fieldbyname('docdate').asdatetime <= DocDate) Do Begin
+    If lowercase(StockValue.CDS.FieldByName('plusOrMinus').AsString) = 'm' Then Begin
+      If StockValue.CDS.FieldByName('Qty').Asfloat <= totalqty Then Begin
+        Totalqty := Totalqty - StockValue.CDS.FieldByName('Qty').Asfloat;
+        Totalvalue := Totalvalue - (StockValue.CDS.FieldByName('Qty').Asfloat * issuerate);
+        op_stockqty := op_stockqty - StockValue.CDS.FieldByName('Qty').Asfloat;
+        op_stockvalue := op_stockvalue - (StockValue.CDS.FieldByName('Qty').Asfloat * issuerate);
+      End
+      Else Begin
+        iqty := StockValue.CDS.FieldByName('Qty').Asfloat - totalqty;
+        Totalvalue := TotalValue-(totalqty*issuerate);
+        op_stockqty := op_stockqty - totalqty;
+        op_stockvalue := op_stockvalue - (totalqty*issuerate);
+        Totalqty := 0;
+        GetNextFIFOBLock(itemid, docdate, iqty);
+      End;
+    End Else begin
+      If FIFOStartId = 0 Then Begin
+        FIFOStartId := StockValue.CDS.FieldByName('StockValueId').AsFloat;
+        TotalQty := TotalQty + StockValue.CDS.FieldByName('Qty').Asfloat;
+        Totalvalue := TotalValue + StockValue.CDS.FieldByName('StockValue').Asfloat;
+        if TotalQty <> 0 then Issuerate := abs(TotalValue)/abs(TotalQty) {else IssueRate := 0};
+      end;
+      op_stockqty := op_stockqty + StockValue.CDS.FieldByName('Qty').Asfloat;
+      op_stockvalue := op_stockvalue + StockValue.CDS.FieldByName('StockValue').Asfloat;
+    End;
+    StockValue.CDS.Next;
+  End;
+End;
+
+Procedure TValueStock.GetNextFIFOBLock(itemid: extended; docdate: TDateTime;
+  Iqty: Extended);
+Begin
+  If FIFOStartId = 0 Then exit;
+  StockPlus.cds.Next;
+  While (Not stockplus.cds.EOF) And (StockPlus.cds.Fieldbyname('itemid').AsFloat =
+    itemid) And (StockPlus.cds.fieldbyname('docdate').asdatetime <= DocDate) Do Begin
+    Totalqty := TotalQty+stockplus.cds.FieldByName('Qty').Asfloat;
+    Totalvalue := TotalValue+stockplus.cds.FieldByName('StockValue').Asfloat;
+    {op_stockqty := op_stockqty + Stockplus.FieldByName('Qty').Asfloat;
+    op_stockvalue := op_stockvalue + Stockplus.FieldByName('StockValue').Asfloat;}
+    if TotalQty <> 0 then IssueRate := abs(TotalValue) / abs(TotalQty){ else IssueRate := 0};
+    If iqty <= totalqty Then Begin
+      Totalqty := totalqty - iqty;
+      Totalvalue := totalvalue - (iqty * issuerate);
+      op_stockqty := op_stockqty - iqty;
+      op_stockvalue := op_stockvalue - (iqty*issuerate);
+      break;
+    End Else Begin
+      iqty := iqty - totalqty;
+      Totalvalue := TotalValue-(TotalQty*issuerate);
+      op_stockqty := op_stockqty - totalqty;
+      op_stockvalue := op_stockvalue - (totalqty*issuerate);
+      Totalqty := 0;
+    End;
+    stockplus.cds.next
+  End;
+End;
+
+Function TValueStock.GetNextFStockValue(Itemid: extended; DocDate: TDateTime;
+  IssueQty: Extended): Extended;
+Begin
+  Result := 0;
+  If (StockValue.CDS.eof) Or (StockValue.CDS.fieldbyname('itemid').AsFloat <> itemid) Then
+   exit;
+  If lowercase(StockValue.CDS.fieldbyname('plusorminus').asstring) = 'p' Then Begin
+    Result := StockValue.CDS.fieldbyname('stockvalue').asfloat;
+  End Else Begin
+    Result := GetFifoValue(Itemid, DocDate, IssueQty);
+  End;
+  StockValue.CDS.next;
+End;
+
+Function TValueStock.GetFIFOValue(itemid: extended; docdate: TDateTime; IssueQty: Extended): Extended;
+Begin
+  result := 0;
+  If FIFOStartId = 0 Then exit;
+  While (Not stockplus.cds.EOF) And (stockplus.cds.Fieldbyname('itemid').AsFloat =
+    itemid) And (stockplus.cds.fieldbyname('docdate').asdatetime <= DocDate) Do Begin
+    if ReadValues then begin
+      TotalQty := stockplus.cds.fieldbyname('qty').asfloat;
+      TotalValue := stockplus.cds.fieldbyname('stockValue').asfloat;
+      if TotalQty <> 0 then IssueRate := abs(TotalValue) / abs(TotalQty) {else IssueRate := 0};
+    end;
+    If (issueqty <= Totalqty) Then Begin
+      Totalqty := Totalqty - issueqty;
+      Totalvalue := Totalvalue - (issueqty * issuerate);
+      result := result + (issueqty * issuerate);
+      IssueQty := 0;
+      Readvalues := false;
+      break;
+    End Else Begin
+      result := result + (Totalqty * issuerate);
+      issueqty := issueqty - Totalqty;
+      Totalvalue := TotalValue - (TotalQty * issuerate);
+      Totalqty := 0;
+    End;
+    stockplus.cds.Next;
+    ReadValues := true;
+  End;
+  If issueqty > 0 Then
+    Result := Result + (issueqty * issuerate);
+End;
+
+{End of GetStockValue related functions}
+
+{GetCostRate related functions}
+Function TValueStock.GetCostRate(ItemId: extended; DocDate: TDateTime; IssueQty:
+  Extended; VMethod, pLocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+var res, locid, batchid:extended;
+Begin
+  Result := 0;
+  CancelDefined;
+  locid := dbm.gf.strtofloatz(plocid);
+  If Not assigned(StockValue) Then
+    StockValue := AssignQuery('StockValue' + floattostr(dbm.gf.gen_id('', 1)));
+  If lowercase(VMethod) = 'w' Then Begin
+    if not getcostrate_w_rebuild then
+      result := GetWCostRate(ItemId, locid, DocDate, IssueQty,pCompid, pBranchid, pBatchid)
+    else begin
+      res := GetWCostRate(ItemId, locid, DocDate, IssueQty,pCompid, pBranchid, pBatchid);
+      if issueqty <> 0 then result := res/issueqty else result := 0;
+    end;
+    OldItemid := Itemid;
+  End;
+  If lowercase(VMethod) = 'f' Then Begin
+    res := GetFCostRate(ItemId, locid, DocDate, IssueQty, pCompid, pBranchid, pBatchid);
+    if issueqty <> 0 then result := res/issueqty else result := 0;
+    OldItemid := Itemid;
+  End;
+End;
+
+Function TValueStock.GetWCostRate(Itemid, locid: extended; DocDate: TDateTime; IssueQty:
+  Extended; pCompid, pBranchid, pBatchid:Extended): Extended;
+Begin
+//  if locid = 0 then
+//    OpenStockValue(itemid, docdate)
+//  else
+//    OpenStockValueL(itemid, locid, docdate);
+  OpenStockValue(itemid, locid, pCompid, pBranchid, pBatchid, docdate);
+  if not getcostrate_w_rebuild then begin
+    if StockValue.CDS.RecordCount > 0 then begin
+      StockValue.CDS.First;
+      result := StockValue.CDS.fieldbyname('rate').asfloat;
+    end else result := 0;
+    exit;
+  end;
+
+  TotalQty := 0;
+  TotalValue := 0;
+  IssueRate := 0;
+  if not stockvalue.CDS.isempty then
+    StockValue.CDS.First;
+  While (Not StockValue.CDS.EOF) And (StockValue.CDS.fieldbyname('itemid').AsFloat =
+    itemid) And (StockValue.CDS.fieldbyname('docdate').asdatetime <= docdate) Do Begin
+    If lowercase(StockValue.CDS.fieldbyname('PlusOrMinus').asstring) = 'p' Then
+    Begin
+      TotalQty := TotalQty + StockValue.CDS.fieldbyname('Qty').Asfloat;
+      TotalValue := TotalValue + StockValue.CDS.fieldbyname('StockValue').asfloat;
+      If TotalQty <> 0 Then
+        IssueRate := abs(TotalValue) / abs(TotalQty);
+    End Else Begin
+      If (StockValue.CDS.fieldbyname('SourceId').AsFloat = ParentDocId) And
+        (ParentDocId > 0) Then
+        IQty := IssueQty
+      Else
+        IQty := StockValue.CDS.fieldbyname('Qty').Asfloat;
+      TotalQty := TotalQty - IQty;
+      TotalValue := TotalValue - (IQty * IssueRate);
+    End;
+    StockValue.CDS.Next;
+    If (StockValue.CDS.fieldbyname('SourceId').AsFloat = ParentDocId) And
+      (ParentDocId > 0) Then break;
+  End;
+  Result := IssueQty * IssueRate;
+End;
+
+Function TValueStock.GetFCostRate(Itemid, locid: extended; DocDate: TDateTime; IssueQty: Extended; pCompid, pBranchid, pBatchid: Extended): Extended;
+Begin
+  TotalQty := 0; TotalValue := 0; IssueRate := 0; FIFOStartId := 0;
+
+//  if locid=0 then
+//    FIFOOpenStockValue(itemid, docdate)
+//  else
+//    FIFOOpenStockValueL(itemid, locid, docdate);
+
+  FIFOOpenStockValue(itemid, locid, pCompid, pBranchid, pBatchid, docdate);
+
+  TotalQty := 0;
+  TotalValue := 0;
+  IssueRate := 0;
+  Fifostartid := 0;
+  If lowercase(StockValue.CDS.FieldByName('plusOrMinus').AsString) = 'p' Then Begin
+    FIFOStartId := StockValue.CDS.FieldByName('StockValueId').AsFloat;
+    TotalQty := StockValue.CDS.FieldByName('Qty').Asfloat;
+    Totalvalue := StockValue.CDS.FieldByName('StockValue').Asfloat;
+    if TotalQty <> 0 then
+     Issuerate := abs(StockValue.CDS.FieldByName('StockValue').Asfloat)/abs(TotalQty)
+    {else
+     IssueRate := 0;}
+  End;
+
+  While (Not StockValue.CDS.EOF) And (StockValue.CDS.Fieldbyname('itemid').AsFloat =
+    itemid) And (StockValue.CDS.fieldbyname('docdate').asdatetime <= DocDate) Do Begin
+    If lowercase(StockValue.CDS.FieldByName('plusOrMinus').AsString) = 'm' Then Begin
+      If StockValue.CDS.FieldByName('Qty').Asfloat <= totalqty Then Begin
+        Totalqty := Totalqty - StockValue.CDS.FieldByName('Qty').Asfloat;
+        Totalvalue := Totalvalue - (StockValue.CDS.FieldByName('Qty').Asfloat * issuerate);
+      End
+      Else Begin
+        iqty := StockValue.CDS.FieldByName('Qty').Asfloat - totalqty;
+        Totalvalue := TotalValue-(totalqty*issuerate);
+        Totalqty := 0;
+        GetNextFIFORate(itemid, docdate, iqty);
+      End;
+    End Else If FIFOStartId = 0 Then Begin
+      FIFOStartId := StockValue.CDS.FieldByName('StockValueId').AsFloat;
+      TotalQty := TotalQty + StockValue.CDS.FieldByName('Qty').Asfloat;
+      Totalvalue := TotalValue + StockValue.CDS.FieldByName('StockValue').Asfloat;
+      if TotalQty <> 0 then Issuerate := abs(TotalValue) / abs(TotalQty) {else IssueRate := 0};
+    End;
+    StockValue.CDS.Next;
+
+    If (StockValue.CDS.fieldbyname('SourceId').AsFloat = ParentDocId) And
+      (ParentDocId > 0) Then break;
+  End;
+  Result := GetFIFOIssueRate(Itemid, DocDate, IssueQty);
+End;
+
+Function TValueStock.GetFIFOIssueRate(itemid: extended; docdate: TDateTime; IssueQty: Extended): Extended;
+Begin
+  result := 0;
+  If FIFOStartId = 0 Then exit;
+  While (Not stockplus.cds.EOF) And (stockplus.cds.Fieldbyname('itemid').AsFloat =
+    itemid) And (stockplus.cds.fieldbyname('docdate').asdatetime <= DocDate) Do Begin
+    If (issueqty <= Totalqty) Then Begin
+      Totalqty := Totalqty - issueqty;
+      Totalvalue := Totalvalue - (issueqty * issuerate);
+      result := result + (issueqty * issuerate);
+      IssueQty := 0;
+      break;
+    End Else Begin
+      result := result + (Totalqty * issuerate);
+      issueqty := issueqty - Totalqty;
+      Totalvalue := TotalValue - (TotalQty * issuerate);
+      Totalqty := 0;
+    End;
+    stockplus.cds.Next;
+    If (Not stockplus.cds.EOF) And (stockplus.cds.Fieldbyname('itemid').AsFloat =
+      itemid) And (stockplus.cds.fieldbyname('docdate').asdatetime <= DocDate) Then
+      Begin
+      TotalQty := stockplus.cds.fieldbyname('qty').asfloat;
+      TotalValue := stockplus.cds.fieldbyname('stockValue').asfloat;
+      if TotalQty <> 0 then IssueRate := abs(TotalValue)/abs(TotalQty){ else IssueRate := 0};
+    End;
+  End;
+  If issueqty > 0 Then
+    Result := Result + (issueqty * issuerate);
+End;
+
+Procedure TValueStock.GetNextFIFORate(itemid: extended; docdate: TDateTime;
+  Iqty: Extended);
+Begin
+  If FIFOStartId = 0 Then exit;
+  stockplus.cds.Next;
+  While (Not stockplus.cds.EOF) And (stockplus.cds.Fieldbyname('itemid').AsFloat =
+    itemid) And (stockplus.cds.fieldbyname('docdate').asdatetime <= DocDate) Do Begin
+    Totalqty := TotalQty+stockplus.cds.FieldByName('Qty').Asfloat;
+    Totalvalue := TotalValue+stockplus.cds.FieldByName('StockValue').Asfloat;
+    if TotalQty <> 0 then IssueRate := abs(TotalValue)/abs(TotalQty){ else IssueRate := 0};
+    If iqty <= totalqty Then Begin
+      Totalqty := totalqty - iqty;
+      Totalvalue := totalvalue - (iqty * issuerate);
+      break;
+    End Else Begin
+      iqty := iqty - totalqty;
+      Totalvalue := TotalValue-(TotalQty*issuerate);
+      Totalqty := 0;
+    End;
+    stockplus.cds.next
+  End;
+End;
+
+{End of GetCostRate related functions}
+
+{GetClosingstock related routines}
+
+Function TValueStock.GetClosingStock(ItemId: extended; DocDate: TDateTime; VMethod, pLocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+var res, locid:extended;
+Begin
+  Result := 0;
+  CancelDefined;
+  locid := dbm.gf.strtofloatz(plocid);
+  If Not assigned(StockValue) Then
+    StockValue := AssignQuery('StockValue' + floattostr(dbm.gf.gen_id('', 1)));
+  If lowercase(VMethod) = 'w' Then Begin
+    Result := GetWClStock(ItemId, locid, DocDate, pCompid, pBranchid, pBatchid);
+    OldItemid := Itemid;
+  End;
+  If lowercase(VMethod) = 'f' Then Begin
+    Result := GetFClStock(ItemId, locid, DocDate, pCompid, pBranchid, pBatchid);
+    OldItemid := Itemid;
+  End;
+End;
+
+Function TValueStock.GetFClStock(Itemid, locid: extended; DocDate: TDateTime; pCompid, pBranchid, pBatchid:Extended): Extended;
+Begin
+  Result := 0;
+  TotalQty := 0; TotalValue := 0; IssueRate := 0; FIFOStartId := 0;
+//  if locid=0 then
+//    FIFOOpenStockValue(itemid, docdate)
+//  else
+//    FIFOOpenStockValueL(itemid, locid, docdate);
+  FIFOOpenStockValue(itemid, locid, pCompid, pBranchid, pBatchid, docdate);
+  TotalQty := 0;
+  TotalValue := 0;
+  IssueRate := 0;
+  Fifostartid := 0;
+  Rec_StockQty := 0;
+  Rec_StockValue := 0;
+  Iss_StockQty := 0;
+  Iss_StockValue := 0;
+  Op_StockQty := 0;
+  Op_StockValue := 0;
+
+  While (Not StockValue.CDS.EOF) And (StockValue.CDS.Fieldbyname('itemid').AsFloat = itemid) And (StockValue.CDS.fieldbyname('docdate').asdatetime <= DocDate) Do Begin
+    If lowercase(StockValue.CDS.FieldByName('plusOrMinus').AsString) = 'm' Then Begin
+      Iss_StockQty := Iss_StockQty + StockValue.CDS.FieldByName('Qty').Asfloat;
+      If StockValue.FieldByName('Qty').Asfloat <= totalqty Then Begin
+        Totalqty := Totalqty - StockValue.CDS.FieldByName('Qty').Asfloat;
+        Totalvalue := Totalvalue - (StockValue.CDS.FieldByName('Qty').Asfloat * issuerate);
+        Iss_StockValue := Iss_StockValue + (StockValue.CDS.FieldByName('Qty').Asfloat * issuerate);
+      End Else Begin
+        {Iss_StockValue := Iss_StockValue + (totalqty*issuerate);
+        iqty := StockValue.FieldByName('Qty').Asfloat - totalqty;
+        Totalvalue := TotalValue-(totalqty*issuerate);
+        Totalqty := 0;
+        Iss_StockValue := Iss_StockValue + GetFIFOValue(Itemid, DocDate, IQty);}
+        //Bug fix
+        ReadValues := false;
+        iqty := StockValue.CDS.FieldByName('Qty').Asfloat;
+        Iss_StockValue := Iss_StockValue + GetFIFOValue(Itemid, DocDate, IQty);
+      End;
+    End Else Begin
+      If FIFOStartId = 0 Then Begin
+        FIFOStartId := StockValue.CDS.FieldByName('StockValueId').AsFloat;
+        TotalQty := TotalQty + StockValue.CDS.FieldByName('Qty').AsFLoat;
+        Totalvalue := TotalValue + StockValue.CDS.FieldByName('StockValue').AsFloat;
+        if TotalQty <> 0 then Issuerate := abs(TotalValue)/abs(TotalQty){ else IssueRate := 0};
+      End;
+      Rec_StockQty := Rec_StockQty + StockValue.CDS.FieldByName('Qty').AsFloat;
+      Rec_StockValue := Rec_StockValue + StockValue.CDS.FieldByName('StockValue').AsFloat;
+    end;
+    if StockValue.CDS.Fieldbyname('docdate').asdatetime < docdate then begin
+      Op_StockQty := Rec_StockQty - Iss_StockQty;
+      Op_StockValue := Rec_stockValue - Iss_StockValue;
+    end;
+    StockValue.CDS.Next;
+  End;
+  Result := TotalQty;
+End;
+
+Function TValueStock.GetWClStock(Itemid, locid: extended; DocDate: TDateTime; pCompid, pBranchid, pBatchid:Extended) : Extended;
+Begin
+  Result := 0;
+//  if locid=0 then
+//    OpenStockValue(itemid, docdate)
+//  else
+//    OpenStockValueL(itemid, locid, docdate);
+  OpenStockValue(itemid, locid, pCompid, pBranchid, pBatchid, docdate);
+  if not getcostrate_w_rebuild then begin
+    if StockValue.CDS.RecordCount > 0 then begin
+      StockValue.CDS.First;
+      result := StockValue.CDS.fieldbyname('stockqty').asfloat;
+    end else result := 0;
+    exit;
+  end;
+  TotalQty := 0;
+  TotalValue := 0;
+  IssueRate := 0;
+  Rec_StockQty := 0;
+  Rec_StockValue := 0;
+  Iss_StockQty := 0;
+  Iss_StockValue := 0;
+  Op_StockQty := 0;
+  Op_StockValue := 0;
+
+  StockValue.CDS.First;
+  While (Not StockValue.CDS.EOF) And (StockValue.CDS.fieldbyname('itemid').AsFloat = itemid) And (StockValue.CDS.fieldbyname('docdate').asdatetime <= docdate) Do Begin
+    If lowercase(StockValue.CDS.fieldbyname('PlusOrMinus').asstring) = 'p' Then Begin
+      TotalQty := TotalQty + StockValue.CDS.fieldbyname('Qty').AsFloat;
+      TotalValue := TotalValue + StockValue.CDS.fieldbyname('StockValue').AsFloat;
+      If TotalQty <> 0 Then
+        IssueRate := abs(TotalValue) / abs(TotalQty);
+      Rec_StockQty := Rec_StockQty + StockValue.CDS.FieldByName('Qty').AsFloat;
+      Rec_StockValue := Rec_StockValue + StockValue.CDS.FieldByName('StockValue').AsFloat;
+    End Else Begin
+      IQty := StockValue.CDS.fieldbyname('Qty').AsFloat;
+      TotalQty := TotalQty - IQty;
+      TotalValue := TotalValue - (IQty * IssueRate);
+      Iss_StockQty := Iss_StockQty + IQty;
+      Iss_StockValue := Iss_StockValue + (IQty*issuerate);
+    End;
+    if StockValue.CDS.Fieldbyname('docdate').asdatetime < docdate then begin
+      Op_StockQty := Rec_StockQty - Iss_StockQty;
+      Op_StockValue := Rec_stockValue - Iss_StockValue;
+    end;
+    StockValue.CDS.Next;
+  End;
+  Result := TotalQty;
+End;
+
+Function TValueStock.GetStockAge(ItemId : Extended; DocDate:TDateTime; PeriodStr, plocid:String) : String;
+var i:integer;
+    s:String;
+    q,t, locid : Extended;
+begin
+  locid := dbm.gf.strtofloatz(plocid);
+  i := 1;
+  SRange.Clear;
+  ERange.Clear;
+  RValue.Clear;
+  While (true) do begin
+    s := dbm.gf.GetnthString(periodstr,i);
+    if s = '' then break;
+    SRange.add(trim(dbm.gf.getnthstring(s, 1, '-')));
+    ERange.add(trim(dbm.gf.getnthstring(s, 2, '-')));
+    RValue.add('0');
+    inc(i);
+  end;
+  GetClosingStock(ItemId, DocDate, 'f', plocid);
+  FifoStartId := stockplus.cds.Fieldbyname('stockvalueid').asfloat;
+  TotalQty := Rec_StockQty - Iss_StockQty;
+  stockplus.cds.Last;
+  While (not stockplus.cds.Bof) and (stockplus.cds.FieldByName('itemid').asfloat = itemid) do begin
+    t := DocDate - stockplus.cds.FieldByname('docdate').asdatetime;
+    if t < 0 then begin
+      stockplus.cds.Prior;
+      continue;
+    end;
+    q := stockplus.cds.Fieldbyname('qty').asfloat;
+    if stockplus.cds.fieldbyname('stockvalueid').asfloat = FifoStartId then
+      Q := TotalQty;
+    TotalQty := TotalQty - q;
+    if totalqty < 0 then begin
+      totalqty := 0;
+      q := 0;
+    end;
+    for i:=0 to SRange.count-1 do begin
+      if (t >= StrToInt(SRange[i])) and (t <= StrToInt(ERange[i])) then begin
+        RValue[i] := FloatToStr(StrToFloat(RValue[i]) + q);
+        break;
+      end;
+    end;
+    if totalqty=0 then break;
+    stockplus.cds.Prior;
+  end;
+  Result := '';
+end;
+
+{End of GetClosingstock related routines}
+
+Procedure TValueStock.OpenStockValue(itemid: extended; docdate: TDateTime);
+Begin
+  If QueryMode Then Begin
+    PrepareQuery(StockValue, 'SELECT * FROM STOCKVALUE where ITEMID= :i '+cancelstr+'order by DOCDATE, DOCTIME');
+    StockValue.AssignParam(0,FloatToStr(itemid),'n');
+  End Else Begin
+    PrepareQuery(StockValue, 'Select * from STOCKVALUE where ITEMID= :i and DOCDATE <= :d '+cancelstr+' order by DOCDATE, DOCTIME');
+    Stockvalue.AssignParam(0, floattostr(itemid), 'n');
+    stockvalue.AssignParam(1, datetimetostr(docdate), 'd');
+    //StockValue.Parambyname('i').AsFloat := Itemid;
+    //StockValue.Parambyname('d').AsDateTime := Docdate;
+  End;
+  StockValue.Open;
+End;
+
+Procedure TValueStock.OpenStockValueL(itemid, locid: extended; docdate: TDateTime);
+Begin
+  If QueryMode Then Begin
+    PrepareQuery(StockValue, 'SELECT * FROM STOCKVALUE where ITEMID= :i and LOCID=:l '+cancelstr+'order by DOCDATE, DOCTIME');
+    stockvalue.AssignParam(0,FloatToStr(itemid),'n');
+    stockvalue.AssignParam(1,FloatToStr(locid),'n');
+  End Else Begin
+    PrepareQuery(StockValue, 'Select * from STOCKVALUE where ITEMID= :i and DOCDATE <= :d and LOCID=:l '+cancelstr+' order by DOCDATE, DOCTIME');
+    stockvalue.AssignParam(0,FloatToStr(itemid),'n');
+    stockvalue.AssignParam(1,DateTimeToStr(Docdate),'d');
+    stockvalue.AssignParam(2,FloatToStr(locid),'n');
+  End;
+  StockValue.Open;
+End;
+
+Procedure TValueStock.OpenStockValue(itemid, locid, Compid, Branchid, Batchid: extended; docdate: TDateTime);
+Var QryStr, PVal, PType : String;
+    i : integer;
+Begin
+  if not getcostrate_w_rebuild then begin
+    if Trim(w_costquery) <> '' then
+      QryStr := w_costquery
+    else
+      QryStr := 'select case when sum(stock_qty)>0 and sum(stock_value)/sum(stock_qty)>0 '+
+      ' then sum(stock_value)/sum(stock_qty) else sum(case when lower(plusorminus)=''p'' '+
+      ' then stock_value else 0 end)/sum(case when lower(plusorminus)=''p'' '+
+      ' then stock_qty else 0 end) end as rate, sum(stock_value) as stockvalue ,'+
+      ' sum(stock_qty) as stockqty from stockvalue ';
+    If QueryMode Then
+      QryStr := QryStr+' where itemid = :i '
+    else
+      QryStr := QryStr+' where itemid = :i and DOCDATE <= :d '
+  end else begin
+    If QueryMode Then
+      QryStr := 'Select * from stockvalue where itemid = :i '
+    else
+      QryStr := 'Select * from stockvalue where itemid = :i and DOCDATE <= :d ';
+  end;
+  if locid > 0 then
+    QryStr := QryStr + ' and Locid=:l ';
+  if Compid > 0 then
+    QryStr := QryStr + ' and Compid=:c ';
+  if Branchid > 0 then
+    QryStr := QryStr + ' and Branchid=:br';
+
+  if batchid > 0 then
+    QryStr := QryStr + ' and batchid=:bt';
+  if not getcostrate_w_rebuild then
+    QryStr := QryStr + cancelstr
+  else
+    QryStr := QryStr + cancelstr+' order by DOCDATE, DOCTIME';
+  PrepareQuery(StockValue,QryStr);
+  for i := 0 to StockValue.CDS.Params.Count-1 do
+  begin
+    PType := 'n';
+    if StockValue.CDS.Params[i].Name = 'i' then
+      PVal := FloatToStr(itemid)
+    else if StockValue.CDS.Params[i].Name = 'd' then begin
+      PVal := DateTimeToStr(Docdate);
+      PType := 'd';
+    end else if StockValue.CDS.Params[i].Name = 'l' then
+      PVal := FloatToStr(locid)
+    else if StockValue.CDS.Params[i].Name = 'c' then
+      PVal := FloatToStr(Compid)
+    else if StockValue.CDS.Params[i].Name = 'br' then
+      PVal := FloatToStr(Branchid)
+    else if StockValue.CDS.Params[i].Name = 'bt' then
+      PVal := FloatToStr(Batchid);
+    stockvalue.AssignParam(i,PVal,PType);
+  end;
+  StockValue.Open;
+End;
+
+
+Procedure TValueStock.FIFOOpenStockValue(itemid: extended; docdate: TDateTime);
+Begin
+  If Not QueryMode Then Begin
+    PrepareQuery(StockValue,'Select * from STOCKVALUE where ITEMID = :i and DOCDATE <= :d'+cancelstr+' order by DOCDATE, DOCTIME');
+    stockvalue.AssignParam(0,FloatToStr(itemid),'n');
+    stockvalue.AssignParam(1,DateTimeToStr(Docdate),'d');
+    StockValue.Open;
+
+    If Not assigned(StockPlus) Then begin
+      Stockplus := AssignQuery('Stockplus');
+      StockPlus.buffered := true;
+    end;
+    PrepareQuery(StockPlus,'Select * from STOCKVALUE where itemid= :i and docdate <= :d and '+dbm.gf.sqllower+'(plusorminus) = ''p'''+cancelstr+' order by DocDate, DOCTIME');
+    stockplus.AssignParam(0,FloatToStr(itemid),'n');
+    stockplus.AssignParam(1,DateTimeToStr(Docdate),'d');
+
+    stockplus.open;
+  End Else Begin
+    PrepareQuery(StockValue, 'Select * from STOCKVALUE where itemid= :i'+cancelstr+' order by DocDate, DOCTIME');
+    stockvalue.AssignParam(0,FloatToStr(itemid),'n');
+    StockValue.Open;
+
+    If Not assigned(StockPlus) Then begin
+      Stockplus := AssignQuery('Stockplus');
+      StockPlus.buffered:=true;
+    end;
+    PrepareQuery(StockPlus,'Select * from STOCKVALUE where itemid= :i and '+dbm.gf.sqllower+'(plusorminus) = ''p'''+cancelstr+' order by DocDate, DOCTIME');
+    stockplus.AssignParam(0,FloatToStr(itemid),'n');
+    stockplus.open;
+  End;
+End;
+
+Procedure TValueStock.FIFOOpenStockValueL(itemid, locid: extended; docdate: TDateTime);
+Begin
+  If Not QueryMode Then Begin
+    PrepareQuery(StockValue,'Select * from STOCKVALUE where ITEMID = :i and DOCDATE <= :d and LOCID=:l'+cancelstr+' order by DOCDATE, DOCTIME');
+    stockvalue.AssignParam(0,FloatToStr(itemid),'n');
+    stockvalue.AssignParam(1,DateTimeToStr(Docdate),'d');
+    stockvalue.AssignParam(2,FloatToStr(locid),'n');
+    StockValue.Open;
+
+    If Not assigned(StockPlus) Then begin
+      Stockplus := AssignQuery('Stockplus');
+      StockPlus.buffered:=true;
+    end;
+    PrepareQuery(StockPlus,'Select * from STOCKVALUE where itemid= :i and docdate <= :d and '+dbm.gf.sqllower+'(plusorminus) = ''p'' and locid=:l'+cancelstr+' order by DocDate, DOCTIME');
+    stockplus.AssignParam(0,FloatToStr(itemid),'n');
+    stockplus.AssignParam(1,DateTimeToStr(Docdate),'d');
+    stockplus.AssignParam(2,FloatToStr(locid),'n');
+    stockplus.open;
+  End Else Begin
+    PrepareQuery(StockValue, 'Select * from STOCKVALUE where itemid= :i and locid=:l'+cancelstr+' order by DocDate, DOCTIME');
+    stockplus.AssignParam(0,FloatToStr(itemid),'n');
+    stockplus.AssignParam(1,FloatToStr(locid),'n');
+    StockValue.Open;
+
+    If Not assigned(StockPlus) Then begin
+      Stockplus := AssignQuery('Stockplus');
+      stockplus.buffered:=true;
+    end;
+    PrepareQuery(StockPlus,'Select * from STOCKVALUE where itemid= :i and '+dbm.gf.sqllower+'(plusorminus) = ''p'' and locid=:l'+cancelstr+' order by DocDate, DOCTIME');
+    stockplus.AssignParam(0,FloatToStr(itemid),'n');
+    stockplus.AssignParam(1,FloatToStr(locid),'n');
+    stockplus.open;
+  End;
+End;
+
+Procedure TValueStock.FIFOOpenStockValue(itemid, locid, Compid, Branchid, Batchid: extended; docdate: TDateTime);
+var SVQry, SPQry, PVal, PType : String;
+    i : integer;
+Begin
+  If QueryMode Then
+  begin
+    SVQry := 'Select * from STOCKVALUE where itemid= :i ';
+    SPQry := 'Select * from STOCKVALUE where itemid= :i and '+dbm.gf.sqllower+'(plusorminus) = ''p'' '
+  end
+  else
+  begin
+    SVQry := 'Select * from STOCKVALUE where ITEMID = :i and DOCDATE <= :d and LOCID=:l'+cancelstr+' order by DOCDATE, DOCTIME';
+    SPQry := 'Select * from STOCKVALUE where itemid= :i and docdate <= :d and '+dbm.gf.sqllower+'(plusorminus) = ''p'' and locid=:l'+cancelstr+' order by DocDate, DOCTIME';
+  end;
+  if locid > 0 then
+  begin
+    SVQry := SVQry + ' and Locid=:l ';
+    SPQry := SPQry + ' and Locid=:l ';
+  end;
+  if compid > 0 then
+  begin
+    SVQry := SVQry + ' and Compid=:c ';
+    SPQry := SPQry + ' and Compid=:c ';
+  end;
+  if Branchid > 0 then
+  begin
+    SVQry := SVQry + ' and Branchid=:br ';
+    SPQry := SPQry + ' and Branchid=:br ';
+  end;
+  if batchid > 0 then
+  begin
+    SVQry := SVQry + ' and batchid=:bt ';
+    SPQry := SPQry + ' and batchid=:bt ';
+  end;
+  SVQry := SVQry + cancelstr+'order by DOCDATE, DOCTIME';
+  SPQry := SPQry + cancelstr+'order by DOCDATE, DOCTIME';
+  If Not assigned(StockPlus) Then begin
+    Stockplus := AssignQuery('Stockplus');
+    StockPlus.buffered:=true;
+  end;
+  PrepareQuery(StockValue,SVQry);
+  for i := 0 to StockValue.ParamNames.Count-1 do
+  begin
+    PType := 'n';
+    if StockValue.ParamNames[i] = 'i' then
+      PVal := FloatToStr(itemid)
+    else if StockValue.ParamNames[i] = 'd' then begin
+      PVal := DateTimeToStr(Docdate);
+      PType := 'd';
+    end else if StockValue.ParamNames[i] = 'l' then
+      PVal := FloatToStr(locid)
+    else if StockValue.ParamNames[i] = 'c' then
+      PVal := FloatToStr(Compid)
+    else if StockValue.ParamNames[i] = 'br' then
+      PVal := FloatToStr(Branchid)
+    else if StockValue.ParamNames[i] = 'bt' then
+      PVal := FloatToStr(batchid);
+    stockvalue.AssignParam(i,PVal,PType);
+  end;
+  StockValue.Open;
+  PrepareQuery(Stockplus,SPQry);
+  for i := 0 to StockPlus.ParamNames.Count-1 do
+  begin
+    PType := 'n';
+    if StockPlus.ParamNames[i] = 'i' then
+      PVal := FloatToStr(itemid)
+    else if StockPlus.ParamNames[i] = 'd' then begin
+      PVal := DateTimeToStr(Docdate);
+      PType := 'd';
+    end else if StockPlus.ParamNames[i] = 'l' then
+      PVal := FloatToStr(locid)
+    else if StockValue.ParamNames[i] = 'c' then
+      PVal := FloatToStr(Compid)
+    else if StockValue.ParamNames[i] = 'br' then
+      PVal := FloatToStr(Branchid)
+    else if StockValue.ParamNames[i] = 'bt' then
+      PVal := FloatToStr(batchid);
+    StockPlus.AssignParam(i,PVal,PType);
+  end;
+  stockplus.cds.Open;
+End;
+
+Procedure TValueStock.PrepareQuery(Q: TXDS; SQLText: String);
+Begin
+  Q := dbm.GetXDS(Q);
+  Q.buffered := True;
+  Q.Close;
+  Q.CDS.CommandText := SQLText;
+End;
+
+Function TValueStock.AssignQuery(QueryName: String): TXDS;
+Begin
+  Result := TXDS.create(Queryname, nil, dbm.Connection,dbm.gf);
+End;
+
+Procedure TValueStock.CancelDefined;
+begin
+  Work := Dbm.GetXDS(work);
+  work.buffered := True;
+  Work.Close;
+  Work.CDS.CommandText := 'Select * from stockvalue where stockvalueid = 0';
+  work.open;
+  if assigned(work.CDS.findfield('cancel')) then
+    CancelStr := ' and CANCEL <> ''T'' '
+  else
+    CancelStr := '';
+  work.close;
+end;
+
+function TValueStock.StockAvailable(Itemid, Locid:Extended; Docdate:TDateTime; Porm:String; Qty:Extended) : String;
+var op:extended;
+    q:TXDS;
+begin
+  result := 'T';
+  Q := Dbm.GetXDS(nil);
+  q.buffered := True;
+  if locid = 0 then begin
+    if dbm.gf.dbase='access' then
+      q.CDS.CommandText := 'Select sum(iif(plusorminus=''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d'+CancelStr
+    else
+      q.CDS.CommandText := 'Select sum(decode(plusorminus,''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d'+CancelStr;
+    q.AssignParam(0, floattostr(itemid), 'n');
+    q.AssignParam(1, datetimetostr(docdate), 'd');
+    //q.Parambyname('i').asfloat := itemid;
+    //q.Parambyname('d').asdatetime := docdate;
+    q.open;
+  end else begin
+    if dbm.gf.dbase='access' then
+      q.CDS.CommandText := 'Select sum(iif(plusorminus=''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d and locid=:l'+CancelStr
+    else
+      q.CDS.CommandText := 'Select sum(decode(plusorminus,''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d and locid=:l'+CancelStr;
+    q.AssignParam(0,FloatToStr(itemid),'n');
+    q.AssignParam(1,DateTimeToStr(docdate),'d');
+    q.AssignParam(2,FloatToStr(locid),'n');
+    q.open;
+  end;
+  if q.CDS.isempty then op := 0 else op := q.CDS.fields[0].asfloat;
+  q.close;
+  work.close;
+  if porm = 'p' then op := csround(op+qty) else op := csround(op-qty);
+  if op < 0 then begin
+    result := 'Not enough stock on '+datetimetostr(docdate);
+    work.close;
+    exit;
+  end;
+
+  if locid = 0 then begin
+    work.CDS.CommandText := 'select * from stockvalue where itemid = :i and docdate > :d '+cancelstr+' order by  DOCDATE, DOCTIME';
+    work.AssignParam(0, floattostr(itemid), 'n');
+    work.AssignParam(1, datetimetostr(docdate), 'd');
+    work.open;
+  end else begin
+    work.CDS.CommandText := 'select * from stockvalue where itemid = :i and docdate > :d and locid=:l '+cancelstr+' order by  DOCDATE, DOCTIME';
+    work.AssignParam(0, floattostr(itemid), 'n');
+    work.AssignParam(1, datetimetostr(docdate), 'd');
+    work.AssignParam(2, floattostr(locid), 'n');
+    work.open;
+  end;
+
+  if work.CDS.isempty then begin
+    work.close;
+    exit;
+  end;
+
+  while not work.CDS.eof do begin
+    if work.CDS.fieldbyname('plusorminus').asstring = 'p' then op := csround(op + work.CDS.fieldbyname('qty').asfloat)
+    else op := csround(op - work.CDS.fieldbyname('qty').asfloat);
+    if op < 0 then begin
+      result := 'Not enough stock on '+work.CDS.fieldbyname('docdate').asstring;
+      work.close;
+      exit;
+    end;
+    work.CDS.next;
+  end;
+end;
+
+function TValueStock.CheckStock(pitemid, poldid, docdate, olddate, porm, pqty, poldqty, dec, plocid, poldlocid : String) : string;
+var dt, d :TDateTime;
+    ItemId, Oldid, Qty, OldQty, locid, oldlocid : Extended;
+begin
+  CancelDefined;
+  itemid := strtofloat(pitemid);
+  oldid := strtofloat(poldid);
+  qty := strtofloat(pqty);
+  oldqty := strtofloat(poldqty);
+  locid := dbm.gf.strtofloatz(plocid);
+  oldlocid := dbm.gf.strtofloatz(poldlocid);
+  if Dec <> '' then csdec := Strtoint(dec) else csdec := 2;
+  result := 'T';
+  if ((oldid <> 0) and (oldid <> itemid)) or ((oldlocid<>0) and (locid<>0) and (oldlocid <> locid)) then begin
+    if olddate = '' then dt := strtodatetime(docdate) else dt := strtodatetime(olddate);
+    Result := StockAvailable(oldid, oldlocid, dt, porm, 0-oldqty);
+    if result <> 'T' then exit;
+    Result := StockAvailable(itemid, locid, strtodatetime(docdate), porm, qty);
+  end else if (OldDate <> '') and (olddate <> docdate) then begin
+    Result := CheckDateChange(itemid, locid, strtodatetime(docdate), strtodatetime(olddate), porm, qty,oldqty);
+    if result <> 'T' then exit;
+  end else
+    Result := StockAvailable(itemid, locid, strtodatetime(docdate), porm, qty-oldqty);
+end;
+
+function TValueStock.CheckDateChange(Itemid, LocId:Extended; Docdate,OldDate:TDateTime; Porm:String; Qty, OldQty:Extended) : String;
+var op, aqty:extended;
+    dt1, dt2 : TDateTime;
+    flag : boolean;
+    pm : String;
+begin
+  if docdate < olddate then begin
+    dt1 := docdate;
+    dt2 := olddate;
+    if porm='p' then op := qty else op := 0-qty;
+    if porm='p' then aqty := 0-oldqty else aqty := oldqty;
+  end else begin
+    dt1 := olddate;
+    dt2 := docdate;
+    if porm='p' then op := 0-oldqty else op := oldqty;
+    if porm='p' then aqty := qty else aqty := 0-qty;
+  end;
+  result := 'T';
+  Work := Dbm.GetXDS(work);
+  work.buffered := True;
+  work.close;
+  if locid = 0 then begin
+    if dbm.gf.dbase='access' then
+      work.CDS.CommandText := 'Select sum(iif(plusorminus=''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d'+CancelStr
+    else
+      work.CDS.CommandText := 'Select sum(decode(plusorminus,''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d'+CancelStr;
+    work.AssignParam(0,FloatToStr(itemid),'n');
+    work.AssignParam(1,DateTimeToStr(dt1),'d');
+    work.open;
+  end else begin
+    if dbm.gf.dbase='access' then
+      work.CDS.CommandText := 'Select sum(iif(plusorminus=''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d and locid=:l'+CancelStr
+    else
+      work.CDS.CommandText := 'Select sum(decode(plusorminus,''p'',qty,-qty)) from stockvalue where itemid=:i and docdate <= :d and locid=:l'+CancelStr;
+    work.AssignParam(0,FloatToStr(itemid),'n');
+    work.AssignParam(1,DateTimeToStr(dt1),'d');
+    work.AssignParam(2,FloatToStr(locid),'n');
+    work.open;
+  end;
+  if not work.CDS.isempty then op := csround(op + work.CDS.fields[0].asfloat);
+  work.close;
+  if op < 0 then begin
+    result := 'Not enough stock on '+datetimetostr(dt1);
+    work.close;
+    exit;
+  end;
+
+  if locid = 0 then begin
+    work.CDS.CommandText := 'select * from stockvalue where itemid = :i and docdate > :d '+ CancelStr + ' order by  DOCDATE, DOCTIME';
+    work.AssignParam(0,FloatToStr(itemid),'n');
+    work.AssignParam(1,DateTimeToStr(dt1),'d');
+    work.open;
+  end else begin
+    work.CDS.CommandText := 'select * from stockvalue where itemid = :i and docdate > :d and locid=:l '+ CancelStr + ' order by  DOCDATE, DOCTIME';
+    work.AssignParam(0,FloatToStr(itemid),'n');
+    work.AssignParam(1,DateTimeToStr(dt1),'d');
+    work.AssignParam(2,FloatToStr(locid),'n');
+    work.open;
+  end;
+
+  flag := true;
+  while not work.CDS.eof do begin
+    pm := work.CDS.fieldbyname('plusorminus').asstring;
+    if (porm = 'p') and (flag) and (work.CDS.fieldbyname('docdate').asdatetime >= dt2) then begin
+      op := csround(op + aqty);
+      flag := false;
+    end;
+    if (porm = 'm') and (flag) then begin
+      if (work.CDS.fieldbyname('docdate').asdatetime = dt2) and (pm='m') then begin
+        op := csround(op + aqty);
+        flag := false;
+      end else if (work.CDS.fieldbyname('docdate').asdatetime > dt2) then begin
+        op := csround(op + aqty);
+        flag := false;
+      end;
+    end;
+    if pm = 'p' then op := csround(op + work.CDS.fieldbyname('qty').asfloat)
+    else op := csround(op - work.CDS.fieldbyname('qty').asfloat);
+    if op < 0 then begin
+      result := 'Not enough stock on '+work.CDS.fieldbyname('docdate').asstring;
+      work.close;
+      exit;
+    end;
+    work.CDS.next;
+  end;
+  if (flag) then begin
+    if csround(op+aqty) < 0 then
+      result := 'Not enough stock on '+datetimetostr(dt2);
+  end;
+  work.close;
+end;
+
+function TValueStock.CSRound(Value:Extended) : Extended;
+begin
+  Result := dbm.gf.PRound(Value, csdec);
+end;
+
+End.
+

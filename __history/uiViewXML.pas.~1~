@@ -1,0 +1,495 @@
+unit uiViewXML;
+{Copied from Ver 10.2}
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, StdCtrls,XMLDoc, XMLIntf;
+
+const
+//iView properties
+        xml_name             =  'a0';
+        xml_Caption          =  'a2' ;
+        xml_loadtstruct      =  'a3' ;
+        xml_trailingspace    =  'a4' ;
+//        xml_headingdetails   =  'a4' ;
+//        xml_ondoubleclick    =  'a5' ;
+//        xml_filterexpression =  'a6' ;
+        xml_printpagetotal   =  'a5' ;
+        xml_expressionset    =  'a6' ;
+//        xml_alwaysgetparam   =  'a9' ;
+//        xml_factor           =  'a7' ;
+        xml_groupfield       =  'a7' ;
+        xml_linesperpage     =  'a8' ;
+        xml_font             =  'a9' ;
+    //    xml_printlogo        =  'a14' ;
+        xml_rowseparator     =  'a10' ;
+    //    xml_showwithrecord   =  'a16' ;
+        xml_grandtotal       =  'a11' ;
+        xml_captioncolumn    =  'a12' ;
+        xml_folder           =  'a13' ;
+        xml_printersettings  =  'a14' ;
+    //    xml_hidden           =  'a21' ;
+        xml_optiontype       =  'a15' ;
+        xml_totalseparator   =  'a16' ;
+        xml_dosgraphicmode   =  'a17' ;
+    //    xml_absolutecheck    =  'a25' ;
+        xml_linespace        =  'a18' ;
+    //    xml_defaultfontstyle =  'a27' ;
+    //    xml_headinglinespace =  'a23' ;
+        xml_condensed        =  'a19' ;
+        xml_showgraph        = 'a65';
+        xml_fittopage        = 'a66';
+//durga
+//        xml_hidden           = 'a21';
+//        xml_ondoubleclick    =  'a30' ;
+        xml_filterexpression =  'a31' ;
+        xml_factor           =  'a32' ;
+        xml_printlogo        =  'a33' ;
+        xml_headinglinespace =  'a34' ;
+        xml_recordidcolumn   = 'a35';
+        xml_nextqueryname    = 'a36';
+        xml_transid          = 'a37';
+        xml_printername      = 'a38';
+        xml_reportstyle      = 'a39';
+        xml_printindexpage   = 'a40';
+        xml_absolutecheck    = 'a41' ;
+        xml_headingcolor = 'a42';
+        xml_heading1font = 'a43';
+        xml_heading2font = 'a44';
+        xml_heading3font = 'a45';
+        xml_headrowcolor = 'a46';
+        xml_headrowfont = 'a47';
+        xml_oddcolor = 'a48';
+        xml_evencolor = 'a49';
+        xml_rowheight = 'a50';
+        xml_pagesize = 'a51';
+
+//====
+          xml_fontname           =  'b1' ;
+          xml_fontsize           =  'b2' ;
+          xml_fontcolor          =  'b3' ;
+          xml_fontheight         =  'b4' ;
+          xml_fontbold           =  'b5' ;
+          xml_fontitalic         =  'b6' ;
+          xml_fontunderline      =  'b7' ;
+          xml_fontstrikeout      =  'b8' ;
+
+          xml_reportheading1     =  'b9' ;
+          xml_reportheading2     =  'b10' ;
+          xml_reportheading3     =  'b11' ;
+          xml_pagefooter1        =  'b12' ;
+          xml_pagefooter2        =  'b13' ;
+          xml_pagefooter3        =  'b14' ;
+          xml_reportfooter1      =  'b15' ;
+          xml_reportfooter2      =  'b16' ;
+          xml_reportfooter3      =  'b17' ;
+          xml_headerAlign        =  'b36' ;
+          xml_footerAlign        =  'b37' ;
+
+          xml_papersize          =  'b18' ;
+          xml_paperwidth         =  'b19' ;
+          xml_paperlength        =  'b20' ;
+          xml_source             =  'b21' ;
+          xml_noofcopies         =  'b22' ;
+          xml_orientation        =  'b23' ;
+          xml_left               =  'a24' ;
+          xml_top                =  'a25' ;
+          xml_right              =  'a27' ;
+          xml_bottom             =  'b27' ;
+          xml_showprinterdialog  =  'b28' ;
+
+          xml_openingcaption     =  'b29' ;
+          xml_closingcaption     =  'b30' ;
+          xml_expressiondetails  =  'b31' ;
+          xml_openingexpression  =  'b32' ;
+          xml_closingexpression  =  'b33' ;
+          xml_totalno            =  'b34' ;
+          xml_detailsinfooter    =  'b35' ;
+          xml_viewtype           =  'b38';
+          xml_CachingType        =  'b39';
+
+//sql properties
+        xml_queryname      = 'a1';
+        xml_sqltext        = 'a2';
+        xml_relationfield  = 'a3';
+        xml_sqltype        = 'a4';
+        xml_primaryfield   = 'a5';
+        xml_secondaryfield = 'a6';
+
+//querycol properties
+        xml_columnname        = 'a2';
+        xml_columnheading     = 'a3';
+        xml_datatype          = 'a4';
+        xml_decimals          = 'a5';
+        xml_expression        = 'a6';
+        xml_runningtotal      = 'a7';
+        xml_displaytotal      = 'a8';
+      //  xml_hidden            = 'a8';
+        xml_norepeat          = 'a13';
+        xml_applycomma        = 'a10';
+        xml_setfactor         = 'a11';
+        xml_color             = 'a12';
+      //  xml_font              = 'a13';
+        xml_alignment         = 'a14';
+        xml_colseparator      = 'a15';
+        xml_zerooff           = 'a16';
+        xml_columnwidth       = 'a17';
+        xml_displayexpression = 'a18';
+        xml_computepost       = 'a19';
+        xml_hidden           =  'a21' ;
+        xml_setcellfont      = 'a22';
+
+//params properties;
+     //   xml_name               = 'a1';
+     //   xml_paramcaption       = 'a2';
+     //   xml_datatype           = 'a3';
+        xml_modeofentry        = 'a13';
+        xml_sourcefield        = 'a6';
+        xml_sourcetable        = 'a7';
+        xml_paramvalue         = 'a8';
+        xml_multiselect        = 'a9';
+     //   xml_expression         = 'a5';
+        xml_validateexpression = 'a10';
+     //   xml_hidden             = 'a21';
+        xml_paramsqlname       = 'a11';
+     //   xml_decimals           = 'a4';
+        xml_savevalue          = 'a12';
+        xml_dynamicparam       = 'a14';
+        xml_Deps               = 'a15';
+        xml_picklistcols       = 'a16';
+
+
+//subtotals properties;
+     //   xml_caption         = 'a2';
+        xml_blockedcolumn   = 'a1';
+     //   xml_captioncolumn   = 'a3';
+        xml_headercaption   = 'a4';
+        xml_footercaption   = 'a5';
+     //   xml_linespace       = 'a6';
+        xml_pageskip        = 'a7';
+        xml_printbalance    = 'a8';
+        xml_balanceddetails = 'a9';
+//durga
+        xml_opcaption = 'a10';
+        xml_clcaption = 'a11';
+        xml_lineseperator = 'a12';
+        xml_totalorder = 'a13';
+//====
+//buttons properties
+      //  xml_caption     = 'a1';
+      //  xml_hidden      = 'a2';
+        xml_details     = 'a3';
+     //   xml_optiontype  = 'a4';
+        xml_optionvalue = 'a5';
+
+        xml_openform = 'a51' ;
+        xml_extractdata = 'a52' ;
+        xml_beforefill = 'a53' ;
+        xml_click      = 'a54' ;
+        xml_dblclick   = 'a55';
+        xml_pvalue = 'a56' ;
+        xml_displayParamWin = 'a57';
+        xml_tablename = 'a58';
+        xml_searchname = 'a59';
+        xml_fixedrows = 'a60';
+        xml_groupno = 'a61';
+        xml_groupheading = 'a62';
+        xml_hideFirstCol = 'a63';
+        xml_hideColumnLines = 'a64';
+        xml_width = 'a67';
+        xml_clrcache =  'a68';
+
+type
+  TiViewXML = class
+  private
+    xml : IXMLDocument;
+    pnode : IXMLNode;
+    procedure iViewProps;
+    procedure AddProps(tnode: IXMLNode; tagname, caption, tagtype, tagdesc,
+      defval, hide: String);
+    procedure sqlProps;
+    procedure querycolProps;
+    procedure columnProps;
+    procedure paramsProps;
+    procedure subtotalsProps;
+    procedure buttonsProps;
+    { Private declarations }
+  public
+    Constructor Create; virtual;
+    Destructor Destroy; override;
+    function ConstructXML:IXMLDocument;
+    { Public declarations }
+  end;
+
+
+implementation
+
+
+Constructor TiViewXML.Create;
+begin
+  inherited Create;
+end;
+
+Destructor TiViewXML.Destroy;
+begin
+  xml := nil;
+  inherited;
+end;
+function TiViewXML.ConstructXML:IXMLDocument;
+begin
+  xml := LoadXMLData('<root></root>');
+  iViewProps;
+  sqlProps;
+  querycolProps;
+  columnProps;
+  paramsProps;
+  subtotalsProps;
+  buttonsProps;
+//  xml.SaveToFile('iViewxml.xml');
+  result := xml;
+end;
+
+
+
+procedure TiViewXML.AddProps(tnode:IXMLNode;tagname,caption,tagtype,tagdesc,defval,hide:String);
+var xnode : IXMLNode;
+begin
+  xnode :=  tnode.ChildNodes.FindNode(tagname);
+  if not assigned(xnode) then
+    xnode := tnode.AddChild(tagname);
+  xnode.Attributes['cap'] := caption;
+  xnode.Attributes['type'] := tagtype;
+  xnode.Attributes['desc'] := tagdesc;
+  xnode.Attributes['hide'] := hide;
+  xnode.NodeValue := defval;
+  xnode := nil;
+end;
+
+procedure TiViewXML.iViewProps;
+begin
+  pnode := xml.DocumentElement.AddChild('iview');
+  AddProps(pnode,xml_Name,'Name','accept','iview','iView1','f');
+  AddProps(pnode,xml_Caption,'Caption','accept','','iView1','f');
+  AddProps(pnode,xml_loadtstruct,'LoadTStruct','select','','','f');
+  AddProps(pnode,xml_trailingspace,'TrailingSpace','accept','','0','f');
+//  AddProps(pnode,xml_headingdetails,'HeadingDetails','others','headingdtls','','f');
+//  AddProps(pnode,xml_ondoubleclick,'OnDoubleClick','select','!Mark/Unmark,Load Query,Load Tree Query,Load Document','Mark/Unmark','f');
+//  AddProps(pnode,xml_filterexpression,'FilterExpression','others','filterexpr','','f');
+  AddProps(pnode,xml_printpagetotal,'PrintPageTotal','select','!True,False','True','f');
+  AddProps(pnode,xml_expressionset,'ExpressionSet','accept','','','f');
+//  AddProps(pnode,xml_alwaysgetparam ,'AlwaysGetParam','select','!True,False','True','f');
+//  AddProps(pnode,xml_factor ,'Factor','select','!Atuals,Hundreds,Thousans,Lacks,Millions,Ten Millions,Billions','Actuals','f');
+  AddProps(pnode,xml_groupfield ,'GroupField','select','','','f');
+  AddProps(pnode,xml_linesperpage ,'LinesPerPage','accept','','0','f');
+  AddProps(pnode,xml_font ,'Font','others','fonddialog','','f');
+//  AddProps(pnode,xml_printlogo ,'PrintLogo','select','!True,False','False','f');
+  AddProps(pnode,xml_rowseparator ,'RowSeparator','select','!True,False','False','f');
+//  AddProps(pnode,xml_showwithrecord ,'ShowWithRecord','select','!True,False','True','f');
+  AddProps(pnode,xml_grandtotal ,'GrandTotal','select','!True,False','False','f');
+  AddProps(pnode,xml_captioncolumn ,'CaptionColumn','select','','','f');
+  AddProps(pnode,xml_folder ,'Folder','select','folders','','f');
+  AddProps(pnode,xml_printersettings ,'PrinterSettings','others','printdialog','','f');
+//  AddProps(pnode,xml_hidden ,'Hidden','select','!True,False','False','f');
+  AddProps(pnode,xml_optiontype ,'OptionType','select','!,Query,TreeQuery,RefQuery,Report,FormReport','','f');
+  AddProps(pnode,xml_totalseparator ,'TotalSeparator','select','','','f');
+  AddProps(pnode,xml_dosgraphicmode ,'DosGraphicMode','select','!Enabled,Disabled','Enabled','f');
+//  AddProps(pnode,xml_absolutecheck ,'AbsoluteCheck','select','!True,False','False','f');
+  AddProps(pnode,xml_linespace ,'LineSpace','select','!True,False','False','f');
+//  AddProps(pnode,xml_defaultfontstyle ,'DefaultFontStyle','select','!Enabled,Disabled','Enabled','f');
+//  AddProps(pnode,xml_headinglinespace ,'HeadingLineSpace','select','!Enabled,Disabled','Enabled','f');
+  AddProps(pnode,xml_condensed ,'Condensed','select','!True,False','False','f');
+  AddProps(pnode,xml_openform ,'CaptionColumn','select','','','f');
+  AddProps(pnode,xml_extractdata ,'CaptionColumn','select','','','f');
+  AddProps(pnode,xml_beforefill ,'CaptionColumn','select','','','f');
+  AddProps(pnode,xml_click ,'CaptionColumn','select','','','f');
+  AddProps(pnode,xml_dblclick ,'CaptionColumn','select','','','f');
+  AddProps(pnode,xml_displayParamWin ,'DisplayParam','select','!True,False','False','f');
+  AddProps(pnode,xml_hideFirstCol ,'DisplayParam','select','!True,False','False','f');
+  AddProps(pnode,xml_hideColumnLines ,'DisplayParam','select','!True,False','False','f');
+
+  AddProps(pnode,xml_reportheading1 ,'reportheading1','accept','','','f');
+  AddProps(pnode,xml_reportheading2 ,'reportheading2','accept','','','f');
+  AddProps(pnode,xml_reportheading3 ,'reportheading3','accept','','','f');
+  AddProps(pnode,xml_pagefooter1    ,'pagefooter1','accept','','','f');
+  AddProps(pnode,xml_pagefooter2    ,'pagefooter2','accept','','','f');
+  AddProps(pnode,xml_pagefooter3    ,'pagefooter3','accept','','','f');
+  AddProps(pnode,xml_reportfooter1  ,'reportfooter1','accept','','','f');
+  AddProps(pnode,xml_reportfooter2  ,'reportfooter2','accept','','','f');
+  AddProps(pnode,xml_reportfooter3  ,'reportfooter3','accept','','','f');
+  AddProps(pnode,xml_detailsinfooter  ,'detailsinfooter','select','!True,False','False','f');
+  AddProps(pnode,xml_headerAlign  ,'headeralign','select','Center,Right,Left','Center','f');
+  AddProps(pnode,xml_footerAlign  ,'footeralign','select','Center,Right,Left','Center','f');
+
+//durga
+//  AddProps(pnode,xml_ondoubleclick,'OnDoubleClick','accept','','0','t');
+  AddProps(pnode,xml_filterexpression,'FilterExpression','accept','','','t');
+  AddProps(pnode,xml_factor,'Factor','accept','','1','t');
+  AddProps(pnode,xml_printlogo,'PrintLogo','select','!True,False','False','t');
+  AddProps(pnode,xml_headinglinespace,'HeadingLineSpace','select','!True,False','False','t');
+  AddProps(pnode,xml_recordidcolumn,'RecordIdColumn','accept','','','t');
+  AddProps(pnode,xml_nextqueryname,'NextQueryName','accept','','','t');
+  AddProps(pnode,xml_transid,'TransId','accept','','','t');
+  AddProps(pnode,xml_printername,'PrinterName','accept','','','t');
+  AddProps(pnode,xml_reportstyle,'ReportStyle','select','!True,False','False','t');
+  AddProps(pnode,xml_printindexpage,'PrintIndexPage','select','!True,False','False','t');
+  AddProps(pnode,xml_hidden ,'Hidden','select','!True,False','False','t');
+  AddProps(pnode,xml_absolutecheck ,'AbsoluteCheck','select','!True,False','False','t');
+
+  AddProps(pnode,xml_headingcolor ,'HeadingColor','accept','','clskyblue','t');
+  AddProps(pnode,xml_heading1font ,'Heading1Font','accept','','[Tahoma,9,clBlack,,True,False,False,False]','t');
+  AddProps(pnode,xml_heading2font ,'Heading2Font','accept','','[Tahoma,8,clBlack,,True,False,False,False]','t');
+  AddProps(pnode,xml_heading3font ,'Heading3Font','accept','','[Tahoma,8,clBlack,,True,False,False,False]','t');
+  AddProps(pnode,xml_headrowcolor ,'HeadRowColor','accept','','$00F3AFA0','t');
+  AddProps(pnode,xml_headrowfont ,'HeadRowFont','accept','','[Tahoma,8,clBlack,,True,False,False,False]','t');
+  AddProps(pnode,xml_oddcolor ,'OddRowColor','accept','','$00EEF1F2','t');
+  AddProps(pnode,xml_evencolor ,'EvenRowColor','accept','','$00E2E8E9','t');
+  AddProps(pnode,xml_rowheight ,'RowHeight','accept','','18','t');
+  AddProps(pnode,xml_pagesize ,'pagesize','accept','','','t');
+  AddProps(pnode,xml_fixedrows,'Fixedrows','accept','','1','f');
+  AddProps(pnode,xml_papersize,'','','','','f');
+  AddProps(pnode,xml_source,'','','','','f');
+  AddProps(pnode,xml_orientation,'','','','','f');
+  AddProps(pnode,xml_noofcopies,'','','','','f');
+  AddProps(pnode,xml_viewtype ,'ViewType','select','!Classic,Interactive','Classic','f');
+  AddProps(pnode,xml_CachingType ,'CachingType','select','!None,InMemory,Session','None','f');
+
+//=======
+
+end;
+
+
+procedure TiViewXML.sqlProps;
+begin
+  pnode := xml.DocumentElement.AddChild('sql');
+  AddProps(pnode,xml_queryname,'QueryName','accept','','sqlid','f');
+//  AddProps(pnode,xml_name,'QueryName','accept','','sqlid','t');
+  AddProps(pnode,xml_sqltext,'SqlText','others','sqltext','','f');
+  AddProps(pnode,xml_relationfield,'RelationField','accept','','','f');
+  AddProps(pnode,xml_sqltype,'SqlType','Select','!ReportSQL,ParamSQL,UtilSQL,FunctionSQL,TreeSQL','ReportSQL','f');
+//  AddProps(pnode,xml_primaryfield,'PrimaryField','select','','','f');
+//  AddProps(pnode,xml_secondaryfield,'SecondaryField','select','','','f');
+end;
+
+procedure TiViewXML.querycolProps;
+begin
+  pnode := xml.DocumentElement.AddChild('querycol');
+  AddProps(pnode,xml_columnname,'ColumnName','accept','sqlcolumn','','f');
+  AddProps(pnode,xml_columnheading ,'ColumnHeading','accept','','','f');
+  AddProps(pnode,xml_queryname,'QueryName','accept','','','f');
+  AddProps(pnode,xml_datatype,'DataType','select','!Numeric,Character,Date/Time','Numeric','f');
+  AddProps(pnode,xml_decimals,'Decimals','accept','','0','f');
+  AddProps(pnode,xml_expression,'Expression','others','exprdialog','','f');
+  AddProps(pnode,xml_runningtotal,'RunningTotal','select','!True,False','False','f');
+  AddProps(pnode,xml_displaytotal,'DisplayTotal','select','!True,False','True','f');
+  AddProps(pnode,xml_hidden,'Hidden','select','!True,False','False','f');
+  AddProps(pnode,xml_norepeat,'NoRepeat','select','!True,False','False','f');
+  AddProps(pnode,xml_applycomma,'ApplyComma','select','!True,False','False','f');
+  AddProps(pnode,xml_setfactor,'SetFactor','select','!True,False','False','f');
+  AddProps(pnode,xml_color,'Color','others','colordialog','Clwindow','f');
+  AddProps(pnode,xml_font,'Font','others','fonddialog','[Arial,8,clBlack,,False,False,False,False]','f');
+  AddProps(pnode,xml_alignment,'Alignment','select','!Right,Left,Centre','Left','f');
+  AddProps(pnode,xml_colseparator,'ColSeparator','select','!True,False','True','f');
+  AddProps(pnode,xml_zerooff,'ZeroOff','select','!True,False','False','f');
+  AddProps(pnode,xml_columnwidth,'ColumnWidth','accept','','80','f');
+  AddProps(pnode,xml_displayexpression,'DisplayExpression','others','displayexprdialog','','f');
+  AddProps(pnode,xml_computepost,'ComputePost','select','!True,False','False','f');
+  AddProps(pnode,xml_beforefill,'BeforeFill','select','','','f');
+  AddProps(pnode,xml_click,'Click','select','','','f');
+  AddProps(pnode,xml_dblclick,'DblClick','select','','','f');
+  AddProps(pnode,xml_tablename,'TableName','accept','','','f');
+  AddProps(pnode,xml_Searchname,'SearchName','accept','','','f');
+  AddProps(pnode,xml_groupno,'GroupNo','accept','','0','f');
+  AddProps(pnode,xml_groupheading,'GroupHeading','accept','','','f');
+end;
+
+procedure TiViewXML.columnProps;
+begin
+  pnode := xml.DocumentElement.AddChild('column');
+  AddProps(pnode,xml_columnname,'ColumnName','accept','column','','f');
+  AddProps(pnode,xml_columnheading ,'ColumnHeading','accept','','','f');
+  AddProps(pnode,xml_datatype,'DataType','select','!Numeric,Character,Date/Time','Character','f');
+  AddProps(pnode,xml_decimals,'Decimals','accept','','0','f');
+  AddProps(pnode,xml_expression,'Expression','others','exprdialog','0','f');
+  AddProps(pnode,xml_runningtotal,'RunningTotal','select','!True,False','False','f');
+  AddProps(pnode,xml_displaytotal,'DisplayTotal','select','!True,False','True','f');
+  AddProps(pnode,xml_hidden,'Hidden','select','!True,False','False','f');
+  AddProps(pnode,xml_norepeat,'NoRepeat','select','!True,False','False','f');
+  AddProps(pnode,xml_applycomma,'ApplyComma','select','!True,False','True','f');
+  AddProps(pnode,xml_setfactor,'SetFactor','select','!True,False','False','f');
+  AddProps(pnode,xml_color,'Color','others','colordialog','Clwindow','f');
+  AddProps(pnode,xml_font,'Font','others','fonddialog','[Arial,8,clBlack,,False,False,False,False]','f');
+  AddProps(pnode,xml_alignment,'Alignment','select','!Right,Left,Centre','Left','f');
+  AddProps(pnode,xml_colseparator,'ColSeparator','select','!True,False','True','f');
+  AddProps(pnode,xml_zerooff,'ZeroOff','select','!True,False','False','f');
+  AddProps(pnode,xml_columnwidth,'ColumnWidth','accept','','80','f');
+  AddProps(pnode,xml_displayexpression,'DisplayExpression','others','displayexprdialog','','f');
+  AddProps(pnode,xml_computepost,'ComputePost','select','!True,False','False','f');
+  AddProps(pnode,xml_beforefill,'BeforeFill','select','','','f');
+  AddProps(pnode,xml_click,'Click','select','','','f');
+  AddProps(pnode,xml_dblclick,'DblClick','select','','','f');
+  AddProps(pnode,xml_tablename,'TableName','accept','','','f');
+  AddProps(pnode,xml_Searchname,'SearchName','accept','','','f');
+  AddProps(pnode,xml_groupno,'GroupNo','accept','','0','f');
+  AddProps(pnode,xml_groupheading,'GroupHeading','accept','','','f');
+end;
+
+procedure TiViewXML.paramsProps;
+begin
+  pnode := xml.DocumentElement.AddChild('params');
+  AddProps(pnode,xml_queryname,'QueryName','accept','','','f');
+  AddProps(pnode,xml_Name,'Name','accept','param','','f');
+  AddProps(pnode,xml_caption,'ParamCaption','accept','','','f');
+  AddProps(pnode,xml_datatype,'DataType','select','!Numeric,Character,Date/Time','','f');
+//  AddProps(pnode,xml_modeofentry,'ModeOfEntry','others','mof','','f');
+//  AddProps(pnode,xml_sourcefield,'SourceField','select','','','f');
+//  AddProps(pnode,xml_sourcetable,'SourceTable','accept','','','f');
+//  AddProps(pnode,xml_paramvalue,'ParamValue','select','','','f');
+  AddProps(pnode,xml_multiselect,'MultiSelect','select','!False','False','f');
+  AddProps(pnode,xml_expression,'Expression','others','exprdialog','','f');
+  AddProps(pnode,xml_validateexpression,'ValidateExpression','others','validateexprdialog','','f');
+  AddProps(pnode,xml_hidden,'Hidden','select','!True,False','False','f');
+  AddProps(pnode,xml_paramsqlname,'ParamSqlName','accept','','','f');
+  AddProps(pnode,xml_decimals,'Decimals','accept','','0','f');
+  AddProps(pnode,xml_savevalue,'SaveValue','select','!True,False','True','f');
+  AddProps(pnode,xml_dynamicparam,'DynamicParam','select','!True,False','False','f');
+  AddProps(pnode,xml_pvalue,'pvalue','accept','','','f');
+//durga
+  AddProps(pnode,xml_modeofentry,'ModeOfEntry','others','mof','accept','t');
+  AddProps(pnode,xml_Deps,'Dependencies','accept','','','t');
+
+end;
+
+procedure TiViewXML.subtotalsProps;
+begin
+  pnode := xml.DocumentElement.AddChild('subtotals');
+//  AddProps(pnode,xml_name,'Caption','accept','','block1','f');
+//  AddProps(pnode,xml_caption,'Caption','accept','','block1','f');
+  AddProps(pnode,xml_blockedcolumn,'BlockedColumn','select','blockedcolumn','','f');
+  AddProps(pnode,xml_captioncolumn,'CaptionColumn','select','captioncolumn','','f');
+  AddProps(pnode,xml_headercaption,'HeaderCaption','accept','','','f');
+  AddProps(pnode,xml_footercaption,'FooterCaption','accept','','','f');
+  AddProps(pnode,xml_linespace,'LineSpace','select','!True,False','False','f');
+  AddProps(pnode,xml_pageskip,'PageSkip','select','!True,False','False','f');
+//  AddProps(pnode,xml_printbalance,'PrintBalance','select','!True,False','False','f');
+//  AddProps(pnode,xml_balanceddetails,'BalancedDetails','others','baldetailsdialog','','f');
+//durga
+  AddProps(pnode,xml_opcaption,'OpCaption','accept','','','t');
+  AddProps(pnode,xml_clcaption,'ClCaption','accept','','','t');
+  AddProps(pnode,xml_lineseperator,'LineSeperator','select','!True,False','False','t');
+  AddProps(pnode,xml_totalorder,'TotalOrder','accept','','1','t');
+//===
+
+end;
+
+procedure TiViewXML.buttonsProps;
+begin
+  pnode := xml.DocumentElement.AddChild('buttons');
+//  AddProps(pnode,xml_Caption,'Caption','accept','','button1','f');
+  AddProps(pnode,xml_Name,'Caption','accept','','button1','f');
+  AddProps(pnode,xml_Hidden,'Hidden','select','!True,False','False','f');
+  AddProps(pnode,xml_Details,'Details','others','detaildialog','','f');
+  AddProps(pnode,xml_OptionType,'OptionType','select','!True,False','False','f');
+  AddProps(pnode,xml_OptionValue,'OptionValue','select','!True,False','False','f');
+end;
+end.

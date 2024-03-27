@@ -1,0 +1,223 @@
+unit uUtils;
+
+interface
+
+uses
+  uDBManager, uAxProvider,uGeneralFunctions,uStructDef,System.SysUtils, System.IOUtils,windows, System.Classes;
+
+var
+  projectname: string;
+  scriptpath: string;
+  Token: string;
+  Owner: string;
+  reponame: string;
+  gitpluginurl: string;
+  gitusername, gitpassword, webcodepath,rmqclientpath: string;
+  client_id,client_secret:string;
+  isProceedNext: Boolean;
+  selectedPlugin: string;
+  pluginLocalPath: string;
+  curdir: string;
+  dbm: TDBManager;
+  axprovider: TAxProvider;
+  gf : TGeneralFunctions;
+  StuctDef : TStructDef;
+
+const
+  // plugin structure
+  cPlugins = 'AxPlugins';
+  cWebFiles = 'HTML';
+  cRMQClients = 'ARM Services';
+  cAxExport = 'Export';
+  cAxpertStructures = 'Structures';
+  cDBScripts = 'Scripts';
+  cRMQ = 'ARM Services';
+  cKey = 'abcdefgh';
+
+procedure Console_Write(const sMessage: string = ''; iColor: Integer = 15);
+procedure Console_Writeln(const sMessage: string = ''; iColor: Integer = 15);
+
+function resetValue(): string;
+//function DecodeDBID(dtid, encDBID: String): String;
+//function EncodeDBID(dtid, dbid: String): String;
+//Function EncryptPwd(pwd: string): String;
+//function DecryptPwd(encryptedPwd: String): String;
+//function GetTimeId(): string;
+function AESDecrypt(const EncryptedText, Key: AnsiString): AnsiString;
+function AESEncrypt(const InputText, Key: AnsiString): AnsiString;
+
+implementation
+
+//uses
+//  Windows;
+
+const
+
+  // colour code for console text
+  Black = 0;
+  Blue = 1;
+  Green = 2;
+  Cyan = 3;
+  Red = 4;
+  Magenta = 5;
+  Brown = 6;
+  LightGray = 7;
+  DarkGray = 8;
+  LightBlue = 9;
+  LightGreen = 10;
+  LightCyan = 11;
+  LightRed = 12;
+  LightMagenta = 13;
+  Yellow = 14;
+  White = 15;
+
+procedure Console_Writeln(const sMessage: string = ''; iColor: Integer = 15);
+var
+  hConsoleOutput: THandle;
+  dwWritten: DWORD;
+begin
+  hConsoleOutput := GetStdHandle(STD_OUTPUT_HANDLE);
+  SetConsoleTextAttribute(hConsoleOutput, iColor);
+  WriteLn('  ' + sMessage);
+  SetConsoleTextAttribute(hConsoleOutput, White);
+  // Reset color to default (white)
+end;
+
+procedure Console_Write(const sMessage: string = ''; iColor: Integer = 15);
+var
+  hConsoleOutput: THandle;
+  dwWritten: DWORD;
+begin
+  hConsoleOutput := GetStdHandle(STD_OUTPUT_HANDLE);
+  SetConsoleTextAttribute(hConsoleOutput, iColor);
+  Write(sMessage);
+  SetConsoleTextAttribute(hConsoleOutput, White);
+  // Reset color to default (white)
+end;
+
+function resetValue(): string;
+begin
+  isProceedNext := False;
+  projectname := '';
+  scriptpath := '';
+  webcodepath := '';
+  gitpassword := '';
+  gitusername := '';
+end;
+
+//function GetTimeId(): string;
+//var
+//  dtime, s, s1: string;
+//  i: Integer;
+//begin
+//  dtime := '01020345060708';
+//  i := strtoint(copy(dtime, 1, 2));
+//  s := inttostr(i + 31);
+//  s := s + inttostr(strtoint(copy(dtime, 3, 2)) + i + 13);
+//  s := s + inttostr(strtoint(copy(dtime, 5, 4)) * i);
+//  s := s + copy(dtime, 9, 2) + copy(dtime, 11, 2) + copy(dtime, 13, 2);
+//  i := length(s);
+//  s1 := format('%.4d', [i]);
+//  result := s + s1;
+//end;
+//
+//function EncodeDBID(dtid, dbid: String): String;
+//var
+//  l, l1, i: Integer;
+//  s, s1: String;
+//begin
+//  result := '';
+//  l := length(dbid);
+//  l1 := length(dtid);
+//  if l1 < l then
+//  begin
+//    for i := l1 to l do
+//      dtid := dtid + '0';
+//  end;
+//  for i := 1 to l do
+//  begin
+//    s := s + Chr(ord(dtid[i]) + ord(dbid[i]));
+//  end;
+//  l := length(s);
+//  for i := 1 to l do
+//  begin
+//    s1 := s1 + format('%.4d', [ord(s[i])]);
+//  end;
+//  i := length(dbid);
+//  s := format('%.4d', [i]);
+//  result := s + s1;
+//end;
+//
+//
+//
+//function DecodeDBID(dtid, encDBID: String): String;
+//var
+//  l, i: Integer;
+//  s, s1: String;
+//begin
+//  result := '';
+//  l := length(dtid);
+//  s := '';
+//  for i := 1 to length(encDBID) div 4 do
+//  begin
+//    s1 := copy(encDBID, (i - 1) * 4 + 1, 4);
+//    s := s + Chr(strtoint(s1));
+//  end;
+//  result := '';
+//  for i := 1 to length(s) do
+//  begin
+//    result := result + Chr(ord(s[i]) - ord(dtid[i]));
+//  end;
+//end;
+//
+//Function EncryptPwd(pwd: string): String;
+//var
+//  sfile, insid, dtid, s, dbn, dbuser: string;
+//  i: Integer;
+//begin
+//  result := '';
+//  insid := pwd;
+//  dtid := GetTimeId();
+//  i := length(dtid);
+//  s := dtid;
+//  delete(s, i - 3, i);
+//  insid := EncodeDBID(s, insid);
+//  insid := insid + dtid;
+//  result := insid;
+//end;
+//
+//function DecryptPwd(encryptedPwd: String): String;
+//var
+//  dtid, dbid: String;
+//  dbidLength, i: Integer;
+//begin
+//  result := '';
+//  dtid := copy(encryptedPwd, length(encryptedPwd) - 6, 12);
+//  dbidLength := strtoint(copy(encryptedPwd, length(encryptedPwd) - 12, 4));
+//  dbid := copy(encryptedPwd, length(encryptedPwd) - 12 - dbidLength * 4,
+//    dbidLength * 4);
+//  result := DecodeDBID(copy(dtid, 1, length(dtid) - 4), dbid);
+//end;
+//
+
+
+function AESEncrypt(const InputText, Key: AnsiString): AnsiString;
+var
+  i: Integer;
+begin
+  Result := InputText;
+  for i := 1 to Length(Result) do
+    Result[i] :=AnsiChar(Ord(Result[i]) xor Ord(Key[i mod Length(Key) + 1]));
+end;
+
+
+function AESDecrypt(const EncryptedText, Key: AnsiString): AnsiString;
+var
+  i: Integer;
+begin
+  Result := EncryptedText;
+  for i := 1 to Length(Result) do
+    Result[i] :=AnsiChar(Ord(Result[i]) xor Ord(Key[i mod Length(Key) + 1]));
+end;
+
+end.

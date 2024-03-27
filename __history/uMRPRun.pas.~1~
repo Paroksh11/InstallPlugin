@@ -1,0 +1,585 @@
+unit uMRPRun;
+{Copied from priorsources}
+{copied from 8.6.8.6}
+
+interface
+
+Uses
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
+  Buttons, Menus, uGeneralFunctions, StdCtrls,udbmanager, uxds, uconnect,uAxprovider,XMLDoc, XMLIntf;
+
+type
+
+  TOnSetProgress = procedure(s:string) of object;
+
+  pMRec = ^TMRec;
+  TMRec = Record
+   Recid : LongInt;
+   ItemId : Extended;
+   FinalQty, Safe, LSize, AvlQty, DemandQty : double;
+   {ActualQty : double}
+  end;
+
+  TMRPRun = class
+  private
+    Demand, MRP, BOM, BOMMast, Work, SchRec, InputSQL : TXds;
+    BOMId, LoadBOMSQL, StockSQL, SchRecSQL, StockParamSQL : String;
+    MRPTableId : integer;
+    ReqDateList, QtyList, BOMQtyList, PChangeList : TStringList;
+    IList, BList : TList;
+    MRec : pMRec;
+
+    procedure OpenDemand;
+    procedure GenerateMRPTable;
+    function RunItemWise:boolean;
+    function RunTreeWise : boolean;
+    procedure GetBOMId;
+    procedure LoadBOM;
+    procedure CreateMRPTable;
+    function GetAvlQty: extended;
+    procedure GetStockParams(var SafeStock, LotSize: extended);
+    procedure MRPAppend;
+    function RoundToLot(Q, l: Extended): Extended;
+    function GetSchRec(itemid:extended; pdate, cdate: TDateTime): Extended;
+    Procedure ClearLists;
+    procedure SetQty(Recid, DemandQty, itemid:extended);
+    procedure WriteToMRP;
+    procedure LoadSQLs;
+
+  public
+    DM : TDataModule;
+    Databasename : String;
+    StartDate, EndDate : TDateTime;
+    SetProgress : TOnSetProgress;
+    dbm : TDBManager;
+    axp : TAxprovider;
+    Constructor Create; virtual;
+    Destructor Destroy; override;
+    procedure RunMRP;
+
+  end;
+
+Function SortOnRecid(Item1, Item2 : Pointer):integer;
+
+implementation
+
+constructor TMRPRun.Create;
+begin
+  demand:=nil;
+  mrp:=nil;
+  bommast:=nil;
+  bom:=nil;
+  schrec:=nil;
+  inputsql:=nil;
+  work:=nil;
+
+  ReqDateList := TStringList.Create;
+  QtyList := TStringList.Create;
+  BOMQtyList := TStringList.Create;
+  PChangeList := TStringList.create;
+  IList := TList.create;
+  BList := TList.create;
+  bom:=nil;
+  work:=nil;
+  schrec:=nil;
+  inherited;
+end;
+
+destructor TMRPRun.Destroy;
+var i:integer;
+begin
+  if assigned(Demand) then Demand.destroy;
+  if assigned(MRP) then MRP.destroy;
+  if assigned(BOMMast) then BOMMast.destroy;
+  if assigned(BOM) then BOM.destroy;
+  if assigned(schrec) then schrec.destroy;
+  if assigned(inputsql) then inputsql.destroy;
+  if assigned(work) then work.destroy;
+
+  ReqDateList.free;
+  QtyList.free;
+  BOMQtyList.Free;
+  PChangeList.Free;
+  ClearLists;
+  IList.free;
+  BList.Free;
+  inherited;
+end;
+
+procedure TMRPRun.RunMRP;
+begin
+  if dbm.gf.apptitle = 'Profit Plus' then begin
+    Showmessage('Not available in Profit Plus');
+    Exit;
+  end;
+  Work := dbm.GetXDS(nil);
+  Work.buffered := True;
+  MRP := axp.dbm.GetXDS(Nil);
+  SchRec := dbm.GetXDS(nil);
+  SchRec.buffered := True;
+  InputSql := dbm.GetXDS(nil);
+  InputSql.buffered := True;
+//  SetProgress('Opening demand');
+  LoadSQLs;
+  OpenDemand;
+  GenerateMRPTable;
+  RunItemWise;
+  RunTreeWise;
+  WriteToMRP;
+//  SetProgress('Completed');
+end;
+
+procedure TMRPRun.GenerateMRPTable;
+var flag : Boolean;
+begin
+  dbm.gf.DoDebug.Msg('>>Firing Sql - Delete from MRPTABLE');
+  Work.CDS.CommandText := '';
+  Work.CDS.CommandText := 'Delete from MRPTABLE';
+  Work.CDS.Execute;
+  demand.CDS.first;
+  MRPTableId := 1;
+  flag := assigned(demand.cds.findfield('bomid'));
+
+  while not demand.CDS.eof do begin
+    if demand.CDS.fieldbyname('demandqty').asfloat <> 0 then begin
+      if not flag then GetBOMId else BOMId := Demand.CDS.FieldByName('bomid').asstring;
+      LoadBOM;
+      if not BOM.cds.IsEmpty then
+        CreateMRPTable;
+      bom.close;
+    end;
+    Demand.CDS.NExt;
+  end;
+end;
+
+procedure TMRPRun.CreateMRPTable;
+var level, r : integer;
+    Dt : TDatetime;
+    ds,ql : string;
+begin
+  MRP.close;
+//  MRP.SQL.Clear;
+  {$ifdef postgres}
+  MRP.SQLtext := 'Select * from mrptable';
+  {$else}
+  MRP.SQLtext  := 'Select * from MRPTABLE';
+  {$endif}
+  MRP.Open;
+  r := BOM.CDS.RecordCount;
+  Bom.CDS.first;
+  MRPAppend;
+  dbm.gf.DoDebug.Msg('Reqdate - '+  Demand.CDS.fieldbyname('demanddate').asstring);
+  dt := Demand.CDS.FieldByName('demanddate').asdatetime - BOM.CDS.fieldbyname('leadtime').asinteger;
+  dbm.gf.DoDebug.Msg('Plandate - '+  datetimetostr(dt));
+  dbm.gf.DoDebug.Msg('DemanQty - '+  Demand.CDS.fieldbyname('demandqty').asString);
+  dbm.gf.DoDebug.Msg('Mlevel - '+  BOM.CDS.fieldbyname('mlevel').asString);
+  MRP.Submit('reqdate',Demand.CDS.fieldbyname('demanddate').asstring,'d');
+  MRP.Submit('plandate', datetimetostr(dt) ,'d');
+  MRP.Submit('Demandqty',Demand.CDS.fieldbyname('demandqty').asString,'c');
+  MRP.Submit('mlevel',BOM.CDS.fieldbyname('mlevel').asString,'c');
+  MRP.Post;
+  ReqDateList.clear;
+  QtyList.clear;
+  BOMQtyList.clear;
+  ReqDateList.Add(DateTimetoStr(dt));
+  QtyList.Add(Demand.CDS.fieldbyname('demandqty').asstring);
+  BOMQtyList.Add(BOM.CDS.fieldbyname('bomqty').asstring);
+  BOM.CDS.next;
+  dec(r);
+
+  while not BOM.CDS.eof do begin
+//    SetProgress('Processing BOM '+BomId+' '+inttostr(r));
+    dec(r);
+    MRPAppend;
+    Level := BOM.CDS.FieldByName('mlevel').asinteger-2;
+    if level < 0 then  ShowMessage('Improper bom tree'); //raise EDatabaseerror.create
+    dbm.gf.DoDebug.Msg('Reqdate - '+ ReqDateList[level] );
+    dt := strtodatetime(ReqDateList[level]) - BOM.CDS.FieldByName('leadtime').asInteger;
+    dbm.gf.DoDebug.Msg('Plandate - '+  datetimetostr(dt));
+    dbm.gf.DoDebug.Msg('DemanQty - '+  Floattostr(strtofloat(QtyList[level]) * BOM.CDS.FieldByName('bomqty').asfloat));
+    dbm.gf.DoDebug.Msg('Mlevel - '+  inttostr(BOM.CDS.FieldByName('mlevel').asinteger));
+    MRP.Submit('reqdate',ReqDateList[level],'d');
+    MRP.Submit('plandate', datetimetostr(dt) ,'d');
+    MRP.Submit('Demandqty',Floattostr(strtofloat(QtyList[level]) * BOM.CDS.FieldByName('bomqty').asfloat),'c');
+    MRP.Submit('mlevel',inttostr(BOM.CDS.FieldByName('mlevel').asinteger),'c');
+    MRP.Post;
+    ds := ReqDateList[level];
+    ql :=  QtyList[level];
+    level := level+1;
+    if qtylist.count <= level then begin
+      ReqDateList.Add(ds);
+      QtyList.Add(Floattostr(strtofloat(ql) * BOM.CDS.FieldByName('bomqty').asfloat));
+      BOMQtyList.Add(BOM.CDS.FieldByName('bomqty').asstring);
+    end else begin
+      ReqDateList[level] := datetimetostr(dt);
+      QtyList[Level] := Floattostr(strtofloat(Ql) * BOM.CDS.FieldByName('bomqty').asfloat);
+      BOMQtyList[Level] := inttostr(BOM.CDS.FieldByName('mlevel').asinteger);
+    end;
+    BOM.CDS.Next;
+  end;
+end;
+
+procedure TMRPRun.MRPAppend;
+begin
+  dbm.gf.DoDebug.Msg('>>Posting To MRP Table');
+  dbm.gf.DoDebug.Msg(BOM.CDS.fieldbyname('itemid').asString);
+  dbm.gf.DoDebug.Msg('BOM Qty'+BOM.CDS.fieldbyname('bomqty').asString);
+  MRP.Append('mrptable');
+  MRP.Submit('mrptableid',FloatToStr(MrpTableid),'c');
+  inc(MRPTableid);
+  MRP.Submit('itemid',BOM.CDS.fieldbyname('itemid').asString,'c');
+  MRP.Submit('itemid',BOM.CDS.fieldbyname('itemid').asString,'c');
+  MRP.Submit('bomqty',BOM.CDS.fieldbyname('bomqty').asString,'c');
+  MRP.Submit('finalqty','0','c');
+  MRP.Submit('bomtreeid',BOM.CDS.fieldbyname('bomtreeid').asString,'c');
+end;
+
+function TMRPRun.RunItemwise : boolean;
+var OldItemid, AvlQty, SafeStock, LotSize, ProdQty, LotProdQty, ProdForSafe, DemandQty : extended;
+    r : integer;
+    cdate, pdate : TDateTime;
+    x : TXDS;
+begin
+  x:= dbm.getxds(nil);
+  x.buffered := true;
+  x.CDS.CommandText := 'select *  from mrptable';
+  if not x.cds.IsEmpty then begin
+    x.Open;
+    x.CDS.Last;
+    r := x.cds.RecordCount;
+  end;
+  x.Close;
+  x.free;
+  result := true;
+//  MRP.SQL.Clear;
+  MRP.SQLtext := 'Select * from MRPTABLE order by ITEMID, REQDATE';
+  MRP.Open;
+  MRP.first;
+  OldItemid := 0;
+  pdate := strtodatetime('01/01/1900');
+  ClearLists;
+  While not MRP.eof do begin
+//    SetProgress('Run itemwise '+inttostr(r));
+    dec(r);
+    if MRP.FieldByName('itemid').asfloat <> olditemid then begin
+      PDate := StrToDateTime('01/01/1900');
+      OldItemId := MRP.FieldByName('itemid').asfloat;
+      AvlQty := GetAvlQty;
+      SafeStock := 0;
+      LotSize := 0;
+      GetStockParams(SafeStock, LotSize);
+    end;
+    cdate := MRP.FieldByName('Reqdate').asdatetime;
+    if cdate <> pdate then
+      AvlQty := AvlQty + GetSchRec(olditemid, pdate, cdate);
+    pdate := cdate;
+
+    new(Mrec);
+    Mrec.AvlQty := AvlQty;
+    DemandQty := MRP.FieldByName('DemandQty').asfloat;
+    ProdQty := DemandQty - AvlQty;
+    if ProdQty > 0 then begin
+      AvlQty := 0;
+    end else begin
+      ProdQty := 0;
+      AvlQty := AvlQty - DemandQty;
+    end;
+    LotProdQty := RoundToLot(ProdQty, LotSize);
+    AvlQty := AvlQty + (LotProdQty - ProdQty);
+    Mrec.RecId := MRP.FieldByName('mrptableid').asinteger;
+    Mrec.ItemId := MRP.FieldByName('ItemId').asfloat;
+    Mrec.FinalQty := ProdQty;
+    Mrec.Safe := SafeStock;
+    MRec.LSize := LotSize;
+    MRec.DemandQty := DemandQty;
+    IList.add(Mrec);
+    BList.Add(MRec);
+    MRP.Next;
+  end;
+  MRP.Close;
+end;
+
+function TMRPRun.RunTreewise : boolean;
+var
+    r, level : integer;
+    parentqty, bomqty, parentbomqty, itemid: extended;
+    x : LongInt;
+    xx : TXds;
+begin
+  xx := dbm.GetXDS(nil);
+  xx.buffered := true;
+  xx.cds.CommandText := 'select *  from mrptable';
+  xx.Open;
+  if not xx.CDS.IsEmpty then begin
+    r := xx.cds.RecordCount;
+  end;
+  xx.close;
+  xx.Free;
+  MRP.Close;
+//  MRP.SQL.Clear;
+  result := true;
+  MRP.SQLtext := 'Select * from MRPTABLE order by MRPTABLEID';
+  MRP.Open;
+  BList.Sort(SortOnRecid);
+  QtyList.clear;
+  BOMQtyList.clear;
+  MRP.First;
+  x := 0;
+  while not MRP.eof do begin
+//    SetProgress('Run Treewise '+inttostr(r));
+    dec(r);
+    bomqty := MRP.FieldByName('bomqty').asfloat;
+    level := MRP.FieldByName('mlevel').asinteger-1;
+    itemid := MRP.FieldByName('itemid').asfloat;
+    if MRP.FieldByName('mlevel').asinteger > 1 then begin
+      parentqty := StrToFloat(qtylist[level-1]);
+      parentbomqty := StrToFloat(Bomqtylist[level-1]);
+      //SetQty(MRP.FieldByName('mrptableid').asfloat, (parentqty * bomqty)/parentbomqty, itemid);
+      SetQty(MRP.FieldByName('mrptableid').asfloat, (parentqty * bomqty), itemid);
+    end else begin
+      parentqty := pMRec(Blist[x]).FinalQty;
+      parentbomqty := 1;
+      SetQty(MRP.FieldByName('mrptableid').asfloat, MRP.FieldByName('demandqty').asfloat, itemid);
+      QtyList.clear;
+      Bomqtylist.clear;
+    end;
+    level := level+1;
+
+    if qtylist.count <= level then begin
+      QtyList.Add(floattostr(pMRec(Blist[x]).finalqty));
+      BomQtyList.add(MRP.FieldByName('bomqty').asstring);
+    end else begin
+      QtyList[Level] := FloatToStr(pMRec(Blist[x]).FinalQty);
+      BOMQtyList[Level] := MRP.FieldByName('bomqty').asstring;
+    end;
+    MRP.Next;
+    inc(x);
+  end;
+  MRP.Close;
+end;
+
+procedure TMRPRun.SetQty(Recid, DemandQty, itemid:extended);
+var k : LongInt;
+    FinalQty, AvlQty, x: Double;
+begin
+  k := 0;
+  while (pMRec(IList[k]).Recid <> Recid) do inc(k);
+  AvlQty := pMRec(IList[k]).Avlqty;
+  while (k < Ilist.count) and (pMRec(IList[k]).itemid = itemid) do begin
+    FinalQty := pMRec(IList[k]).FinalQty;
+    pMRec(IList[k]).avlqty := AvlQty;
+    x := finalqty + avlqty - demandqty - pMRec(IList[k]).safe;
+    finalqty := finalqty - x;
+    if finalqty < 0 then finalqty := 0;
+    //pMRec(IList[k]).ActualQty := FinalQty;
+    FinalQty := RoundToLot(FinalQty, pMRec(IList[k]).LSize);
+    pMRec(IList[k]).FinalQty := FinalQty;
+    AvlQty := AvlQty + FinalQty - DemandQty;
+    pMRec(IList[k]).DemandQty := DemandQty;
+    inc(k);
+    if k < IList.count then DemandQty := pMRec(IList[k]).DemandQty;
+  end;
+end;
+
+procedure TMRPRun.WriteToMRP;
+var k,r:longint;
+    xx : TXDS;
+    w : string;
+    MRP1, MRPTemp : TXDS;
+begin
+  MRPTemp := dbm.GetXDS(nil);
+  MRP1 := dbm.GetXDS(nil);
+  MRP1.buffered := true;
+  MRP1.CDS.CommandText := 'Select * from MRPTABLE order by MRPTABLEID';
+  mrp1.open;
+  xx := dbm.GetXDS(nil);
+  xx.buffered := true;
+  xx.CDS.CommandText := 'select * from mrptable';
+  xx.Open;
+  if not xx.cds.IsEmpty then begin
+    xx.CDS.Last;
+    r := xx.CDS.RecordCount;
+  end;
+  xx.Close;
+  xx.Free;
+  MRP.close;
+//  MRP.SQL.Clear;
+  {$ifdef postgres}
+  MRP.SQLtext := 'Select * from mrptable order by mrptableid';
+  {$else}
+  MRP.SQLtext := 'Select * from MRPTABLE order by MRPTABLEID';
+  {$endif}
+  MRP.Open;
+  MRP.First;
+  k := 0;
+  While not MRP.eof do begin
+    w := 'mrptableid='+MRP.fieldbyname('mrptableid').AsString;
+//    SetProgress('Writing to MRP '+inttostr(r));
+    dec(r);
+    MRPTemp.close;
+    MRPTemp.Edit('mrptable',w);
+    MRPTemp.Submit('finalqty',floattostr(pMRec(BList[k]).FinalQty),'c');;
+    MRPTemp.Submit('avlqty',floattostr(pMRec(BList[k]).avlQty),'c');
+    MRPTemp.Submit('actualqty',floattostr(pMRec(BList[k]).DemandQty),'c');
+{    MRP.FieldByName('finalqty').asfloat := pMRec(BList[k]).FinalQty;
+    MRP.FieldByName('avlqty').asfloat := pMRec(BList[k]).avlqty;
+    MRP.FieldByName('actualqty').asfloat := pMRec(BList[k]).DemandQty;}
+    MRPTemp.Post;
+    MRP.Next;
+    inc(k);
+  end;
+  MRP.Close;
+  MRPTemp.close;
+  MRPTemp.destroy; MRPTemp:=nil;
+end;
+
+procedure TMRPRun.OpenDemand;
+begin
+  dbm.gf.DoDebug.Msg('st - '+dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,StartDate)));
+  dbm.gf.DoDebug.Msg('ed - '+dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,EndDate)));
+  Demand := dbm.getxds(nil);
+  Demand.buffered := True;
+  Demand.CDS.CommandText := 'Select * from Demand where DemandDate between :st and :ed and demandqty > 0';
+  Demand.CDS.params.ParamByName('st').AsString := dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,StartDate));
+  Demand.CDS.params.ParamByName('ed').AsString := dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,EndDate));
+  Demand.Open;
+end;
+
+procedure TMRPRun.GetBOMId;
+begin
+  dbm.gf.DoDebug.Msg('i - '+floattostr(Demand.fieldbyname('itemid').asfloat));
+  BOMMast := dbm.GetXDS(bommast);
+  BOMMast.buffered := True;
+  BOMMast.CDS.CommandText  := 'Select Bomid from BOMMaster where itemid = :i';
+  BOMMast.CDS.Params[0].asfloat := Demand.fieldbyname('itemid').asfloat;
+  BOMMast.open;
+  BOMId := BOMMast.CDS.fields[0].asstring;
+  BOMMast.Close;
+end;
+
+procedure TMRPRun.LoadBOM;
+begin
+  dbm.gf.DoDebug.Msg('bomid - '+BOMID);
+  dbm.gf.DoDebug.Msg('connectno - '+inttostr(dbm.gf.sescount));
+
+
+  bom:=dbm.GetXDS(bom);
+  BOM.buffered :=True;
+  BOM.CDS.CommandText := LoadBOMSQL;
+//  BOM.parambyname ('bomid').asstring := BOMID;
+  BOM.CDS.Params.ParamByName('bomid').AsString := BOMID;
+  if bom.CDS.Params.Count  > 1 then
+//  bom.ParamByName('connectno').asinteger := sescount;
+    BOM.CDS.Params.ParamByName('connectno').AsString := inttostr(dbm.gf.sescount);
+
+  BOM.open;
+end;
+
+function TMRPRun.GetSchRec(itemid:extended; pdate, cdate:TDateTime) : Extended;
+begin
+  dbm.gf.DoDebug.Msg('itemid - '+floattostr(itemid));
+  dbm.gf.DoDebug.Msg('s - '+dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,PDate)));
+  dbm.gf.DoDebug.Msg('e - '+dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,Cdate)));
+  Result := 0;
+  schrec:=dbm.getxds(schrec);
+  SchRec.Close;
+  SchRec.buffered := True;
+  SchRec.CDS.CommandText := SchRecSQL;
+  SchRec.CDS.Params.ParamByName('itemid').AsString  := floattostr(itemid);
+  SchRec.CDS.Params.ParamByName('s').AsString  :=  dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,PDate));//'01/01/1900';//datetimetostr(pdate);
+  SchRec.CDS.Params.ParamByName('e').AsString :=  dbm.gf.findandreplace(dbm.gf.dbdatestring, ':value', dbm.gf.ConvertToDbDateTime(axp.dbm.connection.dbtype,CDate));//datetimetostr(cdate);
+  SchRec.open;
+  if not SchRec.CDS.IsEmpty then
+    Result := SchRec.CDS.Fields[0].AsFloat;
+  SchRec.Close;
+end;
+
+function TMRPRun.GetAvlQty : extended;
+begin
+  dbm.gf.DoDebug.Msg('itemid - '+MRP.FieldByname('itemid').AsString);
+  Work := dbm.GetXDS(work);
+  Work.buffered := True;
+  Work.CDS.CommandText := StockSQL;
+  Work.CDS.params.ParamByName('itemid').AsString := MRP.FieldByName('itemid').asString;
+  Work.open;
+  Result := Work.CDS.Fields[0].asfloat;
+  Work.Close;
+end;
+
+procedure TMRPRun.GetStockParams(Var SafeStock, LotSize : extended);
+begin
+  dbm.gf.DoDebug.Msg('itemid - '+MRP.FieldByname('itemid').AsString);
+  Work := dbm.getxds(work);
+  Work.buffered := True;
+  Work.CDS.CommandText := StockParamSQL;
+  Work.CDS.Params.ParamByName('itemid').AsString  := floattostr(MRP.FieldByName('itemid').asFloat);
+  Work.open;
+  SafeStock := Work.CDS.Fields[0].asfloat;
+  LotSize := Work.CDS.Fields[1].asfloat;
+  Work.Close;
+end;
+
+function TMRPRun.RoundToLot(Q,l:Extended):Extended;
+begin
+  if l = 0 then begin
+    Result := q;
+    exit;
+  end;
+  Result := Int(Q/l);
+  if Frac(Q/l) > 0 then Result := Result+1;
+  Result := Result * l;
+end;
+
+Procedure TMRPRun.ClearLists;
+var i:integer;
+begin
+  for i:=0 to IList.count-1 do
+    dispose(IList[i]);
+  IList.clear;
+  BList.Clear;
+end;
+
+Function SortOnRecid(Item1, Item2 : Pointer):integer;
+begin
+  if pMRec(Item1).Recid > pMRec(Item2).Recid then
+    result := 1
+  else if pMRec(Item1).Recid < pMRec(Item2).Recid then
+    result := -1
+  else
+    result := 0;
+end;
+
+procedure TMRPRun.LoadSQLs;
+var  XMLDoc : IXMLDocument;
+     enode,cnode : IXMLNode;
+begin
+  XMLDoc :=  axp.GetBOMXML;
+  enode := XMLDOc.DocumentElement.ChildNodes.FindNode('mrp');
+  if enode =Nil then begin
+    MessageDlg('<mrp> tag is not found',mtError,[mbcancel],0);
+    exit;
+  end;
+  cnode := enode.ChildNodes.FindNode('getbom');
+  if cnode = Nil then
+     LoadBOMSQL := 'Select * from BOMTree where BOMId = :BOMID order by mtreeid'
+  else
+     LoadBOMSQL := cnode.NodeValue;
+  cnode := enode.ChildNodes.FindNode('getschrec');
+  if cnode = Nil then
+    SchRecSQL := 'Select Nvl(Sum(RecQty-IssQty),0) FROM SCHREC WHERE Itemid = :i and RecDate > :s and RecDate <= :e'
+  else
+    SchRecSQL := cnode.NodeValue;
+  cnode := enode.ChildNodes.FindNode('getstock');
+  if cnode = Nil then
+    StockSQL := 'Select nvl(sum(decode(plusorminus, ''p'', qty, 0-qty)), 0) sumqty from stockvalue where sitemid = :i'
+  else
+    StockSQL := cnode.NodeValue;
+  cnode := enode.ChildNodes.FindNode('getstockparams');
+  if cnode = Nil then
+    StockParamSQL := 'Select SafetyStock, LotSize from itemmaster where itemmasterid = :i'
+  else
+    StockParamSQL := cnode.NodeValue;
+end;
+
+end.
+

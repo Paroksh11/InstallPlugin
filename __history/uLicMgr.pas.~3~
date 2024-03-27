@@ -1,0 +1,1497 @@
+unit uLicMgr;
+{Copied from  Ver 10.9/WebFix2}
+{Copied from  Ver 11.0}
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms,
+  Dialogs, ExtCtrls, StdCtrls, Buttons,uxds,uDBManager,uGeneralFunctions,uCompress,
+  uWMIHardwareID,DateUtils,uAxpertLic,xmldoc,xmlintf;
+
+type
+  TLicMgr = class
+Private
+    x : txds;
+    dbm : TDBManager;
+    //decoding functions----
+    CustKeyCode,IdStr : String;
+    MethodNo:Integer;
+    function DecryptId: Integer;
+    function DecryptId1(sItem: String): Integer;
+    function DecryptId2(sItem: String): Integer;
+    function DecryptId3(sItem: String): Integer;
+    function DecryptId4(sItem: String): Integer;
+    function DecryptId5(sItem: String): Integer;
+    function GetBDayMon: String;
+    function GetCustName: String;
+    function GetDatabase: String;
+    function GetMethodNo: Integer;
+    function GetNoOfProj: Integer;
+    function GetProductCode: Integer;
+    function GetRegInfoFromFile: Boolean;
+    function GetString: String;
+    function GetLicNoOfUsers: Integer;
+    function GetLicNoOfTStructs: Integer;
+    //---
+    function GetNoOfProjects: String;
+    function GetTimeId(insid : String): TDate; Overload ;
+    function GetTimeId(lictimeid,tid : String) : TDatetime; Overload ;
+    function DecodeEndDate(s: String): TDateTime;
+    function WaitForLicence: boolean;
+    function GetLicEdition(ltype : integer ; st: String): String;
+    function GetLicString: String;
+    procedure SaveAxpLicenseDetails;
+    function WideStringToString(const ws: WideString;
+      codePage: Word): AnsiString;
+    function VarifySystemIdentity(licDBId, machineID: String): Boolean;
+    function GetTsLicId(s: string): integer;
+    function SetDataLogin(regkey: String): String;
+    procedure WriteToRegFile(regkey: String);
+
+public
+    CustName,ErrMsg,transTable : String;
+    licDBId, licDBType, licDevLicNo, licBDate,licRDate,licBEDate, licREDate,LicNo   : String;
+    licProdCode , licNoOfUsers , licNoOfBUsers , licNoOfProj , licNoOfTS , licNoOfTrans,unlimitedTS : Integer;
+    licLocations,licServers,licTDServers,lictype,licMtps: Integer;
+    sdatetime : TDateTime;
+    InWait:Boolean;
+    licstr : TStringList;
+    machineID : String;
+    licRegType,licWorkFlow,licAdx,licAxe : String;
+    edition,licvars : String;
+    firstcall : String;
+    UnlimitedTsList : TStringList;
+    filename,licmsg : string;
+
+    function InitLock: Boolean;
+    function GetNoOfUsers(adduser : boolean) : String;
+    function GetNoOfBUsers(adduser : boolean) : String;
+    function GetNoOfTStructs(runtime : boolean): String;
+    function checkLicence : String;
+    function Get_MacId(dtid,mid: String): String;
+    function GetDbId : String;
+    function RTCheckLicence: String;
+    function GetNoOfTrans(transid,transtable,recid : String) : String;
+    procedure Init;
+    function BuildCheck: String;
+    constructor Create(pdbm : TDbManager);
+    destructor Destroy; override;
+    function CallRefreshLic(regkey: String): Boolean;
+end;
+
+    const KeyText : String = 'pM2G8LiS6JcTsR1NwV4DrKvBkC3A';
+    const KeyText1 : String = 'S6JcTsR1c1522MSOELiS6JcTsRex';
+    const KeyText2 : String = 'gfegcu4759mFL56VryVW76cDrE12fRTVdfloip65BFghbDRLMy';
+    const CustKeyText : String = 'rfc822/rfc1522MSOESRecx-uuencodex-uuemac-binhex40RSRFv641522Mutexfjafke9F646W56fgchedms-rtfRFv-mimey';
+implementation
+
+Constructor TLicMgr.Create(pdbm : TDbManager);
+begin
+  inherited create;
+  dbm := pdbm;
+  inwait := False;
+  MachineID := '';
+  licvars := '';
+  x := nil;
+  firstcall := '';
+  unlimitedTS := 0;
+  UnlimitedTsList := TStringList.Create;
+  UnlimitedTsList.Clear;
+  filename := '';
+  licmsg := '';
+end;
+
+Destructor TLicMgr.Destroy;
+begin
+  dbm.gf.dodebug.msg('Destroying License Manager');
+  if assigned(x) then
+  begin
+    dbm.gf.dodebug.msg('Destroying License Manager XDS');
+    x.close;
+    FreeAndNil(x);
+  end;
+  UnlimitedTsList.Clear;
+  FreeAndNil(UnlimitedTsList);
+  dbm.gf.dodebug.msg('Destroying License Manager Completed');
+  inherited;
+end;
+
+procedure TLicMgr.Init;
+begin
+  x := nil;
+  x:=dbm.GetXDS(nil);
+  x.buffered := true;
+end;
+
+function TLicMgr.GetDbId : String;
+  var i: integer;
+  insid,cpuid: String;
+  dtid,dtid1 : Tdate;
+begin
+   result := '';
+   x.close;
+   if (dbm.Connection.DbType = 'oracle') or (dbm.gf.remotedbType = 'oracle') then
+   begin
+      x.CDS.CommandText := 'select dbid from v$database';
+      x. open;
+      result := x.cds.fields[0].asstring;
+   end else
+   begin
+     try
+       x.CDS.CommandText := 'select axpid from axpinstance';
+       x.open;
+     except on e:exception do
+       begin
+         if assigned(dbm) then dbm.gf.DoDebug.Log(dbm.gf.Axp_logstr+'\uLicMgr\GetDbId - '+e.Message);
+         result := 'dberror';
+         x.close;
+         exit;
+       end;
+     end;
+     insid := x.cds.fields[0].asstring;
+     if insid = 'dberror' then
+     begin
+       result := insid;
+       x.close;
+       exit;
+     end;
+     x.close;
+     i := strtoint(copy(insid,1,4));
+     delete(insid,1,4);
+     i := i * 4 ;
+     cpuid := copy(insid,1,i);
+     delete(insid,1,i);
+     dtid := GetTimeId(insid);
+     dtid1 := strtodate(formatdatetime(dbm.gf.ShortDateFormat.ShortDateFormat,(Now())));
+     if (dtid <> dtid1) and (dtid <> dtid1-1) and (dtid <> dtid1+1) then
+     begin
+       result := 'dterror';
+       x.close;
+       exit;
+     end;
+     i := length(insid);
+     delete(insid,i-3,i);
+     result := Get_MacId(insid,cpuid);
+   end;
+   x.close;
+end;
+
+function TLicMgr.GetTimeId(insid : String) : TDate   ;
+   var s : String;
+   i,j : integer;
+    dd,mm,yy : word;
+begin
+  i := strtoint(copy(insid,1,2))-31;
+  s := format('%.2d',[i]);
+  j := strtoint(copy(insid,3,2));
+  j := j - i - 13;
+  s := s +'/' + format('%.2d',[j]);
+  delete(insid,1,4);
+  delete(insid,length(insid)-9,length(insid));
+  j := strtoint(insid);
+  j := j div i;
+  s := s + '/' +format('%.4d',[j]);
+  dd := strtoint(copy(s,1,2));
+  mm := strtoint(copy(s,4,2));
+  yy := strtoint(copy(s,7,4));
+  result := strtodate(formatdatetime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(yy,mm,dd)));
+end;
+
+function TLicMgr.GetTimeId(lictimeid , tid : String) : TDatetime   ;
+   var s,s1 : string;
+   i,j,k : integer;
+    dd,mm,yyyy,hh,nn,ss,zz : word;
+begin
+  i := length(lictimeid);
+  delete(lictimeid,i-3,i);
+  i := strtoint(copy(lictimeid,1,2))-31;
+  s := format('%.2d',[i]);
+  j := strtoint(copy(lictimeid,3,2));
+  j := j - i - 13;
+  s := s +'/' + format('%.2d',[j]);
+  k := length(lictimeid);
+  s1 := copy(lictimeid,k-8,k);
+  delete(lictimeid,k-8,k);
+  delete(lictimeid,1,4);
+  j := strtoint(lictimeid);
+  j := j div i;
+  s := s + '/' +format('%.4d',[j]);
+  dd := strtoint(copy(s,1,2));
+  mm := strtoint(copy(s,4,2));
+  yyyy := strtoint(copy(s,7,4));
+  hh := strtoint(copy(s1,1,3)) - 100;
+  nn := strtoint(copy(s1,4,3)) - 100;
+  ss := strtoint(copy(s1,7,3)) - 100;
+  zz := 0;
+  result := strtodatetime(formatdatetime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(yyyy,mm,dd)) +' '+formatdatetime(dbm.gf.ShortDateFormat.LongTimeFormat,EncodeTime(hh,nn,ss,zz)));
+end;
+
+function TLicMgr.GetNoOfUsers(adduser : boolean) : String;
+begin
+   result := '';
+   exit; //No. of named users checking withdrawn for introducing concurrent users
+   if licNoOfUsers = 9867 then exit;
+   x.close;
+   x.CDS.CommandText := 'select count(username) from axusers where ' + dbm.gf.SQLLower + '(actflag) = ''t''';
+   x. open;
+   if adduser then
+   begin
+     if  x.cds.fields[0].AsInteger + 1 > licNoOfUsers then
+       result := 'No. of users exceeded licensed users';
+   end else begin
+     if x.cds.fields[0].AsInteger > licNoOfUsers  then
+       result := 'No. of users exceeded licensed users';
+   end;
+   x.close;
+end;
+
+function TLicMgr.GetNoOfBUsers(adduser : boolean): String;
+begin
+   result := '';
+   exit; //No. of named users checking withdrawn for by introducing Partner license for build.
+   if licNoOfBUsers <> 9867 then
+   begin
+     x.close;
+     x.CDS.CommandText := 'select count(username) from axusers where ' + dbm.gf.SQLLower + '(actflag) = ''t'' and ' + dbm.gf.SQLLower + '(build) = ''t''';
+     x. open;
+     if adduser then
+     begin
+       if  x.cds.fields[0].AsInteger + 1 > licNoOfBUsers then
+         result := 'No. of developers exceeded licensed number of developers';
+     end else begin
+       if x.cds.fields[0].AsInteger > licNoOfBUsers  then
+         result := 'No. of developers exceeded licensed number of developers';
+     end;
+     x.close;
+   end;
+end;
+
+function TLicMgr.GetNoOfTStructs(runtime : boolean) : String;
+begin
+   result := '';
+   if licNoOfTS = 9867 then exit;
+   x.close;
+   x.CDS.CommandText := 'select count(name) from tstructs where blobno = 1';
+   x. open;
+   if runtime then
+   begin
+     if  x.cds.fields[0].AsInteger > licNoOfTS then
+       result := 'No. of structures exceeded licensed structures';
+   end else
+   begin
+     if x.cds.fields[0].AsInteger + 1 > licNoOfTS  then
+       result := 'No. of structures exceeded licensed structures';
+   end;
+   x.close;
+end;
+
+function TLicMgr.GetNoOfProjects : String;
+begin
+   result := '';
+   if licNoOfProj = 9867 then exit;
+   x.close;
+   if dbm.Connection.DbType = 'oracle' then
+   begin
+     x.CDS.CommandText := 'select count(*) from all_objects where object_type in (''TABLE'',''VIEW'') and object_name = ''AXUSERS'' order by 1';
+     x. open;
+     if  x.cds.fields[0].AsInteger > licNoOfProj then
+     begin
+       result := 'No. of projects exceeded licensed projects';
+     end;
+     x.close;
+   end else if dbm.Connection.DbType = 'mysql' then
+   begin
+     x.CDS.CommandText := 'select count(*) from information_schema.tables where table_name = ''AXUSERS'' order by 1';
+     x. open;
+     if  x.cds.fields[0].AsInteger > licNoOfProj  then
+     begin
+       result := 'No. of projects exceeded licensed projects';
+     end;
+     x.close;
+   end else if dbm.Connection.DbType = 'postgre' then
+   begin
+     x.CDS.CommandText := 'select count(*) from information_schema.tables where upper(table_name) = ''AXUSERS'' order by 1';
+     x. open;
+     if  x.cds.fields[0].AsInteger > licNoOfProj  then
+     begin
+       result := 'No. of projects exceeded licensed projects';
+     end;
+     x.close;
+
+   end;
+end;
+
+function TLicMgr.checkLicence : String;
+  var dbid,everno,dt,dt1,s,dbType,insid  : String;
+  n : integer;
+  ldt1, ldt2 : TDateTime;
+begin
+  result := '';
+
+  if licREDate <> '' then
+  begin
+    dt := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,sdatetime);
+    dt1 := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,now);
+    if (DaysBetween(strtodate(licREDate),strtodate(dt)) < 7) then
+        licmsg := 'License will expire soon. Please contact your Application Administrator...';
+    if (strtodate(dt) > strtodate(licREDate)) or (strtodate(dt1) > strtodate(licREDate))then
+    begin
+        result := 'License expired.';
+        exit;
+    end;
+    if DaysBetween(strtodate(dt),strtodate(dt1)) > 1 then
+    begin
+      result := 'Client and Server Dates are different. Cannot continue.';
+      exit;
+    end;
+  end;
+
+  if inwait then exit;
+
+//  if dbm.gf.EvalCopy then exit;
+
+  if (LicDbType <> '100') then
+  begin
+    if dbm.gf.RemoteLogin then
+       dbType := dbm.gf.remotedbType
+    else
+       dbType := dbm.Connection.DbType;
+    if dbType <> lowercase(licDBType) then
+    begin
+      result := 'DB type not compatible with axpert licensed version';
+      exit;
+    end;
+  end;
+
+  {
+  s := GetNoOfProjects ;
+  if s <> '' then
+  begin
+    result := s;
+    exit;
+  end;
+  }
+  if not dbm.gf.EvalCopy then
+     edition := GetLicEdition(lictype,licRegType);
+  if dbm.gf.IsService then
+  begin
+    s := GetNoOfUsers(false);
+    if s <> '' then
+    begin
+      result := s;
+      exit;
+    end;
+
+    if (licRegType = 'D') or (licRegType = 'P') then
+    begin
+      s := GetNoOfBUsers(false);
+      if s <> '' then
+      begin
+        result := s;
+        exit;
+      end;
+    end;
+
+    s := GetNoOfTStructs(true) ;
+    if s <> '' then
+    begin
+      result := s;
+      exit;
+    end;
+    licvars := '' + '~' + ''  + '~' + inttostr(licNoOfTrans) + '~' + inttostr(licNoOfUsers) + '~' + inttostr(licNoOfBUsers)+ '~' + inttostr(unlimitedTS)+ '~' + inttostr(licTDServers) ;
+    licvars := licvars + '~' + licRegType ;
+  end;
+end;
+
+function TLicMgr.RTCheckLicence : String;
+  var dt,dt1,s : String;
+  n : integer;
+begin
+  result := '';
+  s := '';
+  if licREDate <> '' then
+  begin
+    if dbm.gf.RemoteLogin then
+       dt := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,sdatetime)
+    else dt := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,dbm.GetServerDateTime);
+    dt1 := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,now);
+    if (strtodate(dt) > strtodate(licREDate)) or (strtodate(dt1) > strtodate(licREDate))then
+    begin
+       result := 'License expired.';
+       exit;
+    end;
+    if DaysBetween(strtodate(dt),strtodate(dt1)) > 1 then
+    begin
+      result := 'Client and Server Dates are different. Can not continue.';
+      exit;
+    end;
+  end;
+  if dbm.gf.EvalCopy then exit;
+
+  s := GetNoOfUsers(false);
+  if s <> '' then
+  begin
+    result := s;
+    exit;
+  end;
+
+  s := GetNoOfTStructs(true) ;
+  if s <> '' then
+  begin
+    result := s;
+    exit;
+  end;
+
+  if (licRegType = 'D') then
+  begin
+    s := GetNoOfBUsers(false);
+    if s <> '' then
+    begin
+      result := s;
+      exit;
+    end;
+    s := BuildCheck;
+    if s <> '' then
+    begin
+      result := s;
+      exit;
+    end;
+  end;
+end;
+
+function TLicMgr.BuildCheck : String;
+  var dt,dt1,s : String;
+  n : integer;
+begin
+  result := '';
+  s := '';
+  if licBEDate <> '' then
+  begin
+    if dbm.gf.RemoteLogin then
+       dt := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,sdatetime)
+    else dt := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,dbm.GetServerDateTime);
+    dt1 := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,now);
+    if (strtodate(dt) > strtodate(licBEDate)) or (strtodate(dt1) > strtodate(licBEDate))then
+    begin
+       result := 'Developer License expired.';
+       exit;
+    end;
+    if DaysBetween(strtodate(dt),strtodate(dt1)) > 1 then
+    begin
+      result := 'Client and Server Dates are different. Can not continue.';
+      exit;
+    end;
+  end;
+end;
+
+//licence file decoding functions
+
+Function TLicMgr.DecodeEndDate(s:String):TDateTime;
+var ws:String;
+    w,d,m,y:word;
+    dt:TDateTime;
+begin
+//The corresponding encode function is uRegister.EncodeEndDate
+  result:=strtodate('01/01/1900');
+  if length(s) < 30 then exit;
+  delete(s, 23, 1);
+  delete(s, 17,1);
+  delete(s,12,1);
+  delete(s,8,1);
+  delete(s,5,1);
+  delete(s,3,1);
+  ws:=copy(s, 1, 8);
+  if ws='' then exit;
+  y:=strtoint(copy(ws,1,4));
+  m:=strtoint(copy(ws,5,2));
+  d:=strtoint(copy(ws,7,2));
+  dt:=encodedate(y,m,d);
+  w:=dayofweek(dt);
+  y:=strtoint(copy(s,9,6)) div (w+1);
+  m:=strtoint(copy(s,15,6))div(w+2);
+  d:=strtoint(copy(s,21,6))div(w+3);
+  result:=encodedate(y,m,d);
+end;
+
+Function TLicMgr.WaitForLicence:boolean;
+var q:TXDS;
+    dt:TDateTime;
+begin
+  //This function checks if a request for license file has been sent within the last 5 days.
+  result:=false;
+  q:=dbm.getxds(nil);
+  q.buffered:=true;
+  q.cds.CommandText:='select caption from axprops where name=''appcount''';
+  q.open;
+  if not q.isempty then begin
+    dt:=DecodeEndDate(q.cds.FieldByName('caption').asstring);
+    result := dbm.getserverdatetime<=dt;
+  end;
+  if result then begin
+    licNoOfUsers:=9867;
+    licNoOfBUsers:=9867;
+    licNoOfProj:=9867;
+    licNoOfTS:=9867;
+    licNoOfTrans:=9867;
+    inwait:=true;
+  end;
+end;
+
+Function TLicMgr.InitLock:Boolean ;
+Begin
+  ErrMsg := '';
+  if GetRegInfoFromFile then
+  begin
+    result:=True;
+  end else
+  begin
+   if ErrMsg = ''then ErrMsg := 'Axpert license file has been corrupted';
+  end;
+End;
+
+function TLicMgr.VarifySystemIdentity(licDBId,machineID : String) : Boolean;
+   var i,j : integer;
+       s,s1 : string;
+begin
+   result := false;
+   if (licDBId = machineID) or (machineID = 'siteedition') then
+   begin
+     result := true;
+     exit;
+   end;
+   j := 0;
+   i := 1;
+   while True do
+   begin
+    s := dbm.gf.GetNthString(licDBId,i,'~');
+    s1 := dbm.gf.GetNthString(machineID,i,'~');
+    if i >= 8 then break;
+    if (s <> '') and (s1 <> '') then
+    begin
+      if s = s1 then
+      begin
+        j := j + 1;
+        if j >= 2 then
+        begin
+          result := true;
+          break;
+        end;
+      end;
+    end;
+    inc(i);
+   end;
+end;
+
+Function TLicMgr.GetRegInfoFromFile :Boolean;
+   var i,j,rdaymon,byear,ryear : integer;
+   cpu_id , bdaymon ,s,verno,mid,macid: String;
+   y,m,d : word;
+   HWID : THardwareId ;
+   BiosId,ProcessorId,MbId,SysIdStr,tults,Osid,dname : String;
+   systemid : boolean;
+begin
+    if machineID = '' then
+    begin
+      try
+       HWID:=THardwareId.Create;
+       macid := trim(HWID.GetMACAddress);
+       try
+         machineID := trim(HWID.GenerateHardwareId);
+         BiosId := trim(HWID.BiosId);
+         ProcessorId := trim(HWID.ProcessorId);
+         MbId := trim(HWID.MbId);
+         Osid := trim(HWID.OSId);
+       except
+       end;
+       try
+         dname := HWID.GetDomainName;
+       except
+       end;
+      finally
+       FreeAndNil(HWID);
+      end;
+      machineID :=  MbId + '~' + BiosId + '~' + ProcessorId + '~' + OsId + '~' + macid + '~' + dname;
+    end;
+    Result:=False;
+    try
+      licDBId := '';
+      licDBType := '';
+      licDevLicNo := '';
+      licProdCode := -1;
+      licBEDate := '';
+      licREDate := '';
+      idstr := licstr.Strings[0];
+      if (idstr = '') then exit;
+      MethodNo := GetMethodNo;
+      j := length(idstr);
+      i := strtoint(copy(idstr,j-3,j));
+      idstr := copy(idstr,1,j-4);
+      j := j - 3;
+      cpu_id := copy(idstr,j-i,j);
+      delete(idstr,j-i,j);
+      CustName := GetCustName;
+      i := length(idStr);
+      mid := copy(idStr,1,i-28);
+      licDBId := Get_MacId(cpu_id,mid);
+      dbm.gf.dodebug.msg('Id1 : ' + licDBId);
+      dbm.gf.dodebug.msg('Id2 : ' + machineID);
+      systemid := VarifySystemIdentity(licDBId,machineID);
+      if not systemid then
+      begin
+         ErrMsg:='License not compatible with this System';
+         Exit;
+      end;
+      i := length(idstr);
+      idStr := copy(idStr,i-27,i);
+      if MethodNo = 0 then
+      begin
+           ErrMsg:='Invalid Method No.';
+           Exit;
+      end;
+      licProdCode := GetProductCode;
+      if licProdCode < 0 then
+      begin
+           ErrMsg:='Invalid ProductCode';
+           Exit;
+      end;
+
+      licDBtype := GetDataBase;
+      if (LicDbType <> '100') then
+      begin
+        if licDBtype = '' then
+        begin
+             ErrMsg:='Invalid Database ' ;
+             Exit;
+        end;
+      end;
+
+      licNoOfUsers := GetLicNoOfUsers;
+      if licNoOfUsers = 0 then
+      begin
+           ErrMsg:='Zero No. of Users ' ;
+           Exit;
+      end;
+
+      licNoOfProj := GetNoOfProj;
+      if licNoOfProj = 0 then
+      begin
+           ErrMsg:='Zero No. of Projects ';
+           Exit;
+      end;
+
+      licNoOfTS := GetLicNoOfTStructs;
+      if licNoOfTS = 0 then
+      begin
+           ErrMsg:='Zero No. Of TStructs';
+           Exit;
+      end;
+      idstr := licstr.Strings[1];
+      LicNo := GetLicString;
+      idStr := copy(idStr,1,28);
+
+      licNoOfBUsers := GetProductCode;
+
+      bdaymon := GetBDayMon;
+      if bdaymon <> '9999' then
+      begin
+        byear := GetNoOfProj;
+        s := copy(bdaymon,1,2);
+        d := strtoint(s);
+        s := copy(bdaymon,3,2) ;
+        m := strtoint(s);
+        s := inttostr(byear);
+        y := strtoint(s);
+        try
+          licBDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        except on e:exception do
+        begin
+          byear := GetLicNoOfTStructs;
+          s := copy(bdaymon,1,2);
+          d := strtoint(s);
+          s := copy(bdaymon,3,2) ;
+          m := strtoint(s);
+          s := inttostr(byear);
+          y := strtoint(s);
+          licBDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        end;
+        end;
+      end;
+      rdaymon := GetLicNoOfUsers;
+      bdaymon := format('%.4d',[rdaymon]);
+      if bdaymon <> '9999' then
+      begin
+        ryear := GetLicNoOfTStructs;
+        s := copy(bdaymon,1,2);
+        d := strtoint(s);
+        s := copy(bdaymon,3,2) ;
+        m := strtoint(s);
+        s := inttostr(ryear);
+        y := strtoint(s);
+        try
+          licRDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        except on e:exception do
+        begin
+          ryear := GetNoOfProj;
+          s := copy(bdaymon,1,2);
+          d := strtoint(s);
+          s := copy(bdaymon,3,2) ;
+          m := strtoint(s);
+          s := inttostr(ryear);
+          y := strtoint(s);
+          licRDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        end;
+        end;
+      end;
+
+      idstr := licstr.Strings[1];
+      delete(idStr,1,78);
+      licDevLicNo := GetLicString;
+
+      lictype := GetProductCode;
+
+      bdaymon := GetBDayMon;
+      if bdaymon <> '9999' then
+      begin
+        byear := GetNoOfProj;
+        s := copy(bdaymon,1,2);
+        d := strtoint(s);
+        s := copy(bdaymon,3,2) ;
+        m := strtoint(s);
+        s := inttostr(byear);
+        y := strtoint(s);
+        try
+          licBEDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        except on e:exception do
+        begin
+          byear := GetLicNoOfTStructs;
+          s := copy(bdaymon,1,2);
+          d := strtoint(s);
+          s := copy(bdaymon,3,2) ;
+          m := strtoint(s);
+          s := inttostr(byear);
+          y := strtoint(s);
+          licBEDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        end;
+        end;
+      end;
+      rdaymon := GetLicNoOfUsers;
+      bdaymon := format('%.4d',[rdaymon]);
+      if bdaymon <> '9999' then
+      begin
+        ryear := GetLicNoOfTStructs;
+        s := copy(bdaymon,1,2);
+        d := strtoint(s);
+        s := copy(bdaymon,3,2) ;
+        m := strtoint(s);
+        s := inttostr(ryear);
+        y := strtoint(s);
+        try
+          licREDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        except on e:exception do
+        begin
+          ryear := GetNoOfProj;
+          s := copy(bdaymon,1,2);
+          d := strtoint(s);
+          s := copy(bdaymon,3,2) ;
+          m := strtoint(s);
+          s := inttostr(ryear);
+          y := strtoint(s);
+          licREDate := formatDateTime(dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(y,m,d));
+        end;
+        end;
+      end;
+      idstr := licstr.Strings[2];
+      licLocations := strtoint(copy(idStr,1,4));
+      licServers := strtoint(copy(idStr,5,4));
+      licTDServers := strtoint(copy(idStr,9,4));
+      licNoOfTrans := strtoint(copy(idStr,13,7));
+      if licNoOfTrans = 0 then
+      begin
+         ErrMsg:='Zero No. Of Transactions';
+         Exit;
+      end;
+      licMtps := strtoint(copy(idStr,20,7));
+      idstr := licstr.Strings[3];
+      licRegType :=  GetString;
+      edition := GetLicEdition(lictype,licRegType);
+      licWorkFlow := GetString;
+      licAdx := GetString;
+      licAxe := GetString;
+
+      if licNoOfTrans <> 9867 then
+      begin
+        if trim(idstr) <> '' then
+        begin
+          tults := GetString;
+          if tults <> '' then unlimitedTS := strtoint(tults);
+        end;
+        if unlimitedTS > 0 then
+        begin
+          if trim(dbm.gf.UnlimitedTransIds) = '' then
+          begin
+             ErrMsg:='License check failed for No. of TStructs allowed for unlimited transaction';
+             Exit;
+          end else UnlimitedTsList.Text := dbm.gf.UnlimitedTransIds;
+        end;
+      end;
+      Result := True;
+      dbm.gf.dodebug.msg('License check success');
+    except on e: exception do
+    begin
+      dbm.gf.dodebug.msg('Error Message in licensing check : ' + e.Message);
+      Result := False;
+    end;
+    end;
+end;
+
+function TLicMgr.Get_MacId(dtid,mid : String) : String;
+var l,l1, i, k : Integer;
+    s,s1,s2,dbid : String;
+    ans : AnsiString;
+begin
+  Result := '';
+  s := mid;
+  l := length(s);
+  while s <> '' do
+  begin
+    s1 := copy(s,1,4);
+    k := strtoint(s1);
+    s2 := AnsiChar(k);
+    dbid := dbid + s2;
+    delete(s,1,4);
+  end;
+  l := Length(dbid);
+  ans := WideStringToString(dbid,1252);
+  l1 := Length(dtid);
+  if l1 < l then
+  begin
+    for i := l1 to l do
+        dtid := dtid + '0';
+  end;
+  for i := 1 to l do
+  begin
+    s := s + WideChar(ord(ans[i])-Ord(dtid[i]));
+  end;
+  result := s;
+end;
+
+Function TLicMgr.GetCustName:String;
+    var len,i,j : integer;
+    st : String;
+    ans : AnsiString;
+begin
+    Result:='';
+    i := length(idStr);
+    j := i;
+    st :=  Copy(idStr,i-99,100);
+    CustKeyCode := st;
+    ans := WideStringToString(st,1252);
+    len := ord(ans[1])- ord(CustKeyText[1]);
+    for i := 2 to len+1 do
+    begin
+       Result := Result+WideChar(ord(ans[i])-ord(CustKeyText[i]));
+    end;
+    delete(idStr,j-99,100);
+end;
+
+function TLicMgr.WideStringToString(const ws: WideString; codePage: Word): AnsiString;
+var
+  l: integer;
+begin
+  if ws = ' 'then
+    Result := ' '
+  else
+  begin
+    l := WideCharToMultiByte(codePage,
+      WC_COMPOSITECHECK or WC_DISCARDNS or WC_SEPCHARS or WC_DEFAULTCHAR,
+      @ws[1], - 1, nil, 0, nil, nil);
+    SetLength(Result, l - 1);
+    if l > 1 then
+      WideCharToMultiByte(codePage,
+        WC_COMPOSITECHECK or WC_DISCARDNS or WC_SEPCHARS or WC_DEFAULTCHAR,
+        @ws[1], - 1, @Result[1], l - 1, nil, nil);
+  end;
+end;
+
+Function TLicMgr.GetString:String;
+    var len,i,j : integer;
+    st : String;
+    ans : AnsiString;
+begin
+    Result:='';
+    st :=  Copy(idStr,1,28);
+    CustKeyCode := st;
+    ans := WideStringToString(st,1252);
+    len := ord(ans[1])-ord(KeyText1[1]);
+    for i := 2 to len+1 do
+       Result := Result+WideChar(ord(ans[i])-ord(KeyText1[i]));
+    delete(idStr,1,28);
+end;
+
+Function TLicMgr.GetLicString:String;
+    var len,i,j : integer;
+    st : String;
+    ans : AnsiString;
+begin
+    Result:='';
+    st :=  Copy(idStr,1,50);
+    CustKeyCode := st;
+    ans := WideStringToString(st,1252);
+    len := ord(ans[1])-ord(KeyText2[1]);
+    for i := 2 to len+1 do
+       Result := Result+WideChar(ord(ans[i])-ord(KeyText2[i]));
+    delete(idStr,1,50);
+end;
+
+Function TLicMgr.GetMethodNo :Integer;
+   var st : integer;
+begin
+    Result:=0;
+    st := DecryptID;
+    if (st >0) then
+         Result:=st;
+end;
+
+Function TLicMgr.DecryptId:Integer;
+  var j : integer;
+begin
+  j := strtoint(copy(idStr,1,4));
+  j := j * 4;
+  Result := ((ord(idStr[j+4+6])-ord(KeyText[6])));
+  delete(idStr,1,4);
+end;
+
+Function TLicMgr.DecryptId1(sItem: String):Integer;
+var sId : String;
+    i, sNo, eNo : Integer;
+begin
+  sId := '';
+  if (sItem ='ProductCode') then begin
+    sNo := 1;
+    eNo := 4;
+  end;
+  if (sItem ='MaxUsers') then begin
+    sNo := 7;
+    eNo := 10;
+  end;
+  if (sItem ='MaxTStruct') then begin
+    sNo := 13;
+    eNo := 16;
+  end;
+  if (sItem ='DataBase') then begin
+    sNo := 19;
+    eNo := 22;
+  end;
+  if (sItem ='Country') then begin
+    sNo := 25;
+    eNo := 28;
+  end;
+  for i := sNo to eNo do begin
+    sId := sId + IntToStr((ord(idStr[i])-ord(KeyText[i])));
+  end;
+  Result := StrToInt(sId);
+end;
+
+Function TLicMgr.DecryptId2(sItem: String):Integer;
+var sId : String;
+    i, sNo, eNo : Integer;
+begin
+  sId := '';
+  if (sItem ='ProductCode') then begin
+    sNo := 2;
+    eNo := 5;
+  end;
+  if (sItem ='MaxUsers') then begin
+    sNo := 7;
+    eNo := 10;
+  end;
+  if (sItem ='MaxTStruct') then begin
+    sNo := 12;
+    eNo := 15;
+  end;
+  if (sItem ='DataBase') then begin
+    sNo := 17;
+    eNo := 20;
+  end;
+  if (sItem ='Country') then begin
+    sNo := 22;
+    eNo := 25;
+  end;
+  for i:= sNo to eNo do begin
+    sId := sId + IntToStr(ord(idStr[i])-ord(KeyText[i]));
+  end;
+  Result := StrToInt(sId);
+end;
+
+Function TLicMgr.DecryptId3(sItem: String):Integer;
+var sId : String;
+    i, sNo, eNo : Integer;
+begin
+  sId := '';
+  if (sItem ='ProductCode') then begin
+    sNo := 1;
+    eNo := 4;
+  end;
+  if (sItem ='MaxUsers') then begin
+    sNo := 8;
+    eNo := 11;
+  end;
+  if (sItem ='MaxTStruct') then begin
+    sNo := 13;
+    eNo := 16;
+  end;
+  if (sItem ='DataBase') then begin
+    sNo := 18;
+    eNo := 21;
+  end;
+  if (sItem ='Country') then begin
+    sNo := 23;
+    eNo := 26;
+  end;
+  for i:= sNo to eNo do begin
+    sId := sId + IntToStr((ord(idStr[i])-ord(KeyText[i])));
+  end;
+  Result := StrToInt(sId);
+end;
+
+Function TLicMgr.DecryptId4(sItem: String):Integer;
+var sId : String;
+    i, sNo, eNo : Integer;
+begin
+  sId := '';
+  if (sItem ='ProductCode') then begin
+    sNo := 2;
+    eNo := 5;
+  end;
+  if (sItem ='MaxUsers') then begin
+    sNo := 9;
+    eNo := 12;
+  end;
+  if (sItem ='MaxTStruct') then begin
+    sNo := 14;
+    eNo := 17;
+  end;
+  if (sItem ='DataBase') then begin
+    sNo := 19;
+    eNo := 22;
+  end;
+  if (sItem ='Country') then begin
+    sNo := 24;
+    eNo := 27;
+  end;
+  for i:= sNo to eNo do begin
+    sId := sId + IntToStr((ord(idStr[i])-ord(KeyText[i])));
+  end;
+  Result := StrToInt(sId);
+end;
+
+Function TLicMgr.DecryptId5(sItem: String):Integer;
+var sId : String;
+    i, sNo, eNo : Integer;
+begin
+  sId := '';
+  if (sItem ='ProductCode') then begin
+    sNo := 9;
+    eNo := 12;
+  end;
+  if (sItem ='MaxUsers') then begin
+    sNo := 13;
+    eNo := 16;
+  end;
+  if (sItem ='MaxTStruct') then begin
+    sNo := 17;
+    eNo := 20;
+  end;
+  if (sItem ='DataBase') then begin
+    sNo := 21;
+    eNo := 24;
+  end;
+  if (sItem ='Country') then begin
+    sNo := 25;
+    eNo := 28;
+  end;
+  for i:= sNo to eNo do begin
+    sId := sId + IntToStr((ord(idStr[i])-ord(KeyText[i])));
+  end;
+  Result := StrToInt(sId);
+end;
+
+
+Function TLicMgr.GetProductCode:Integer;
+var
+st:integer;
+begin
+    Result:=-2;
+    case MethodNo of
+      1: st := DecryptId1('ProductCode');
+      2: st := DecryptId2('ProductCode');
+      3: st := DecryptId3('ProductCode');
+      4: st := DecryptId4('ProductCode');
+      5: st := DecryptId5('ProductCode');
+    end;
+    if (st>=-1) then
+    Begin
+         Result:=st;
+    end;
+end;
+
+Function TLicMgr.GetLicNoOfUsers:Integer;
+var
+st:integer;
+begin
+    Result:=0;
+    case MethodNo of
+      1: st := DecryptId1('MaxUsers');
+      2: st := DecryptId2('MaxUsers');
+      3: st := DecryptId3('MaxUsers');
+      4: st := DecryptId4('MaxUsers');
+      5: st := DecryptId5('MaxUsers');
+    end;
+    Result:=st;
+end;
+
+Function TLicMgr.GetLicNoOfTStructs:Integer;
+var
+st:integer;
+begin
+    Result:=0;
+    case MethodNo of
+      1: st := DecryptId1('MaxTStruct');
+      2: st := DecryptId2('MaxTStruct');
+      3: st := DecryptId3('MaxTStruct');
+      4: st := DecryptId4('MaxTStruct');
+      5: st := DecryptId5('MaxTStruct');
+    end;
+    Result:=st;
+end;
+
+Function TLicMgr.GetDatabase:String;
+var  st,ProductDbNo:integer;
+begin
+    Result:='';
+    ProductDbNo := -1;
+    case MethodNo of
+      1: st := DecryptId1('DataBase');
+      2: st := DecryptId2('DataBase');
+      3: st := DecryptId3('DataBase');
+      4: st := DecryptId4('DataBase');
+      5: st := DecryptId5('DataBase');
+    end;
+
+    if (st=100) then
+    begin
+      result := inttostr(st)
+    end
+    else
+    begin
+         ProductDbNo := st;
+         case st of
+            1 : Result := 'Access';
+            2 : Result := 'Oracle';
+            3 : Result := 'Ms SQL';
+            4 : Result := 'PostGres';
+            5 : Result := 'MySQL';
+         end;
+     end
+end;
+
+Function TLicMgr.GetBDayMon:String;
+var  st:integer;
+begin
+    Result:='';
+    case MethodNo of
+      1: st := DecryptId1('DataBase');
+      2: st := DecryptId2('DataBase');
+      3: st := DecryptId3('DataBase');
+      4: st := DecryptId4('DataBase');
+      5: st := DecryptId5('DataBase');
+    end;
+
+    if (st<=0) then
+    begin
+    end
+    else
+    begin
+         result := format('%.4d',[st]);
+    end
+end;
+
+Function TLicMgr.GetNoOfProj:Integer;
+var
+st:integer;
+begin
+    Result:=0;
+    case MethodNo of
+      1: st := DecryptId1('Country');
+      2: st := DecryptId2('Country');
+      3: st := DecryptId3('Country');
+      4: st := DecryptId4('Country');
+      5: st := DecryptId5('Country');
+    end;
+    Result:=st;
+end;
+
+Function TLicMgr.GetLicEdition(ltype : integer ; st : String) : String;
+begin
+   if ltype = 1 then result := 'Developer Edition'
+   else if ltype = 2 then result := 'Desktop License'
+   else if ltype = 3 then result := 'Distribution Edition'
+   else if ltype = 4 then result := 'Partner License'
+   else if ltype = 5 then result := 'Site License'
+   else if ltype = 6 then result := 'Web License';
+end;
+
+function TLicMgr.GetTsLicId(s:string) : integer;
+  var i,k,j: integer;
+begin
+  k := 0;
+  s := lowercase(s);
+  for i := 1 to length(s) do
+  begin
+     j := ord(s[i]);
+     k := k + (j + i*100);
+  end;
+  result := k;
+end;
+
+function TLicMgr.GetNoOfTrans(transid,transtable,recid : String) : String;
+   var s,licid,w,trans,tt : String;
+   i,j,rno : integer;
+   q : TXds;
+begin
+   result := '';
+   dbm.gf.dodebug.msg('GetNoOfTrans Check');
+   if (dbm.gf.dbmflag = 'axpman') or (dbm.gf.dbmflag = 'axputil') then exit;
+   trans := '';rno:=0;
+   s:='';w:='';
+   q := nil;
+   result := '';
+   if licNoOfTrans = 0 then
+   begin
+     result := 'No. of transactions exceeded licensed transactions';
+     exit;
+   end;
+   dbm.gf.dodebug.msg('Reg Type : ' + licRegType);
+   if (licRegType = 'D') or (licRegType = 'P') or (dbm.gf.EvalCopy) then
+   begin
+      if dbm.gf.IsService then
+      begin
+         dbm.gf.dodebug.msg('PTN : ' + inttostr(dbm.gf.LicWebSessionTrans));
+         dbm.gf.LicSessionTrans := dbm.gf.LicWebSessionTrans + 1 ;
+         dbm.gf.dodebug.msg('PWTN : ' + inttostr(dbm.gf.LicSessionTrans));
+         dbm.gf.LicWebSessionTrans := dbm.gf.LicSessionTrans;
+      end else dbm.gf.LicSessionTrans := dbm.gf.LicSessionTrans + 1;
+      if lowercase(copy(dbm.LoginUser,length(dbm.LoginUser)-4,5)) <> 'axdef' then
+      begin
+        if dbm.gf.LicSessionTrans > 20 then
+        begin
+          result := 'No. of transactions allowed per session exceeded for this license edition. Please logout and login again to continue...';
+          exit;
+        end;
+      end;
+      if licRegType = 'P' then licNoOfTrans := 9867;  //withdraw 500 transaction restriction for partner edition.
+   end;
+   if licNoOfTrans <> 9867 then
+   begin
+      i := GetTsLicId(transid);
+      s := inttostr(i);
+      licid := dbm.gf.Leftpad(s,15,'0');
+      x.close;
+      x.CDS.CommandText := 'select lictrans from axlictrans where licid  = ' + quotedstr(licid);
+      x.open;
+      if x.CDS.IsEmpty then
+      begin
+        x.close;
+        x.CDS.CommandText := 'select count(' + quotedstr(recid)+ ') from ' + transTable;
+        x.open;
+        rno := x.CDS.Fields[0].AsInteger + 1;
+      end else
+      begin
+        s := x.CDS.Fields[0].AsString;
+        delete(s,1,2);
+        tt := copy(s,length(s)-2,3);
+        delete(s,length(s)-2,3);
+        rno := strtoint(s) - strtoint(tt) + 1;
+      end;
+      if unlimitedTS > 0 then
+      begin
+        if unlimitedTS >= UnlimitedTsList.Count - 1 then
+        begin
+          if UnlimitedTsList.IndexOf(lowercase(transid)) < 0  then
+          begin
+            if rno > licNoOfTrans then
+            begin
+              if unlimitedTS < UnlimitedTsList.Count - 1 then
+              begin
+                UnlimitedTsList.Add(lowercase(transid));
+                SaveAxpLicenseDetails;
+              end else
+              begin
+                result := 'No. of transactions exceeded licensed transactions';
+                exit;
+              end;
+            end;
+          end;
+        end else
+        begin
+          if rno > licNoOfTrans then
+          begin
+            result := 'No. of transactions exceeded licensed transactions';
+            exit;
+          end;
+        end;
+      end else
+      begin
+        if rno > licNoOfTrans then
+        begin
+          result := 'No. of transactions exceeded licensed transactions';
+          exit;
+        end;
+      end;
+      x.close;
+      if result = '' then
+      begin
+        trans :=  FormatDateTime('nnzzz',now);
+        tt := copy(trans,3,3);
+        if not assigned(q) then q:=dbm.GetXDS(nil);
+        s := copy(trans,1,2) + inttostr(rno+strtoint(tt)) + tt;
+        w:='licid='+quotedstr(licid);
+        q.Submit('licid',licid,'c');
+        q.Submit('lictrans', s , 'c');
+        q.AddOrEdit('axlictrans', w);
+        q.Post;
+        if assigned(q) then
+        begin
+          q.close;
+          FreeAndNil(q);
+        end;
+      end;
+   end;
+end;
+
+Procedure TLicMgr.SaveAxpLicenseDetails;
+  var  stm,cstm : TStringStream;
+  w : AnsiString;
+begin
+  try
+    w:='licid='+quotedstr('licstring');
+    stm := TStringStream.Create('');
+    UnlimitedTsList.SaveToStream(stm);
+    stm.Position := 0;
+    with TCompress.Create do begin
+      cstm := CompressStream(stm);
+      destroy;
+    end;
+    cstm.Position := 0;
+    dbm.WriteMemo('lictrans','axliccontrol',w,cstm,true);
+  finally
+    if assigned(cstm) then FreeAndNil(cstm);
+    if assigned(stm) then FreeAndNil(stm);
+  end;
+end;
+
+function TLicMgr.CallRefreshLic(regkey : String) : Boolean;
+  var s,licstring : String;
+begin
+  licstring := '';
+  result := true;
+  try
+    if edition = 'User Edition' then
+       regkey := regkey + '/U'
+    else if edition = 'Developer Edition' then
+       regkey := regkey + '/D'
+    else if edition = 'Distribution Edition' then
+       regkey := regkey + '/W'
+    else if edition = 'Site Edition' then
+       regkey := regkey + '/L'
+    else if edition = 'Processor Edition' then
+     regkey := regkey + '/R'
+    else if edition = 'Partner Edition' then
+     regkey := regkey + '/P';
+    s :=  dbm.gf.AESCall.URL;
+    dbm.gf.AESCall.URL := 'http://license.agile-labs.com/licensescripts/AxpertLicManager.dll/soap/AxpertLic' ;
+//    dbm.gf.AESCall.URL := 'http://192.168.43.3/AxpertScriptsPerf/AxpertLicManager.dll/soap/AxpertLic' ;
+    licstring := ( dbm.gf.AESCall as AxpertLic).RefreshAxpLic(SetDataLogin(regkey)) ;
+    dbm.gf.AESCall.URL := s;
+    if copy(licstring,1,7) <> '<error>' then
+    begin
+      if edition = 'Partner Edition' then
+         WriteToRegFile(dbm.gf.LicString)
+      else if edition = 'Developer Edition' then
+         dbm.UpdateLicenseInDB(dbm.gf.LicDevString,'dlic','refreshed')
+      else if edition = 'Site Edition' then
+         dbm.UpdateLicenseInDB(dbm.gf.LicLocString,'llic','refreshed')
+      else dbm.UpdateLicenseInDB(dbm.gf.LicString,'alic','refreshed');
+    end else raise Exception.Create(licstring);
+  except on e:exception do
+    begin
+      licstring := e.Message;
+      if copy(e.Message,1,7) = '<error>' then
+      begin
+         delete(licstring,1,7);
+      end else licstring := 'Resheshing License failed...';
+      result := false;
+    end;
+  end;
+  if licstring <> '' then
+  begin
+    dbm.gf.execActName := 'CallRefreshLic';
+    dbm.update_errorlog('licrefresh',licstring);
+  end;
+end;
+
+function TLicMgr.SetDataLogin(regkey : String): String;
+var xml : IXMLDocument;
+    xnode,n : IXMLNode;
+    xmlstg : String;
+begin
+    xml := LoadXMLData('<root></root>') ;
+    xnode:=xml.documentelement;
+    xnode.attributes['axpapp'] := '';
+    xnode.attributes['sessionid'] := dbm.CreateSessionId;
+    n := xnode.AddChild('data');
+    n.NodeValue := regkey;
+    xnode.Attributes['regkeyfile'] := 'F';
+    xml.savetoxml(xmlstg);
+    result := xmlstg;
+end;
+
+procedure TLicMgr.WriteToRegFile(regkey : String);
+var f: TextFile;
+    sfile,sErr : String;
+begin
+  if dbm.gf.IsService then exit;
+  sErr := '';
+  sfile := ExtractFilepath(Application.ExeName) + 'axpert.org';
+  AssignFile(f, sfile);
+  Rewrite(f);
+  try
+    try
+      regkey := dbm.UpdateLicStringWithTStamp(dbm.ServerDateTime)+'|'+trim(regkey);
+      Writeln(f,regkey);
+    except
+      on E:Exception do sErr := E.Message;
+    end;
+  finally
+    CloseFile(f);
+  end;
+  try
+    with TCompress.Create do begin
+       compressfile(sfile, filename);
+       destroy;
+    end;
+      if fileexists(filename) then
+      begin
+         if fileexists(sfile) then deletefile(sfile);
+      end;
+  except
+      on E:Exception do sErr := E.Message;
+  end;
+  if (sErr <> '') then
+  begin
+    dbm.gf.execActName := 'WriteRefreshLic';
+    dbm.update_errorlog('licrefresh',sErr);
+  end;
+end;
+
+end.

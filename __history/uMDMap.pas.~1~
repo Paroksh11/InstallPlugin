@@ -1,0 +1,1416 @@
+unit uMDMap;
+{copied from ver 9.7}
+interface
+
+Uses db, classes, forms, sysutils, StrUtils,
+Extctrls, dialogs, controls, Variants, uStructDef, uXDS,
+xmldoc, xmlintf, uPropsXML, uDoDebug;
+
+type
+
+pFieldData = ^TFieldData;
+TFieldData = record
+  Value, OldValue, datatype, table : String;
+  id, oldid : extended;
+end;
+
+TGetFieldData = procedure(FieldName : String; RowNo:Integer; FieldData:pFieldData) of object;
+TGetRowcount = function(FrameNo:integer):integer of object;
+
+pDef = ^TDef;
+TDef = record
+  Transid, Table, ControlField, TargetTypes, TreeTable, TreeLink,CompanyName : String;
+  target, source, decs : TStringList;
+  SourceFrame : integer;
+  Append, Tree, InitOnDel, PostOnApprove, PostOnReject : boolean;
+end;
+
+pData = ^TData;
+TData = record
+  SQLString, table, TargetTypes : String;
+  target, source, value, decs : TStringList;
+  Append, NoChange, Positive : Boolean;
+  def : pDef;
+end;
+
+TMDMap = Class
+  private
+    data, sdata : pData;
+    def : pdef;
+    datalist, defs : TList;
+    FieldData : pFieldData;
+    positive, Treecall, ControlChanged, LinkChanged, InitOld : Boolean;
+    QUAL, QUA, Upd, w, QTree, QMaxMin, QUS : TXDS;
+    Parents : TStringList;
+    ParentId, MTransid : String;
+    sdef:TStructDef;
+    fld:pfld;
+    map:ixmlnode;
+
+    procedure LoadAMDMap(elist: TStringList);
+    procedure AddToDefs(S: String);
+    procedure UpdateOrAdd;
+    procedure SplitString(S:String; var ls,rs:String);
+    procedure GetIdStrings( rowno:integer; var s1, s2:String);
+    procedure AddToData(searchstr:String; r:Integer);
+    function RecFound(s:String):integer;
+    procedure FillValues(r:integer);
+    procedure ReverseValues(r:integer);
+    function GetDef(Transid,mt,ms,ml,cf: String): integer;
+    function GetSourceFrame: integer;
+    function GetTargetType(TableName, FieldName: String): String;
+    function GetPrefix: String;
+    procedure SetTargetTypes;
+    function convertparam(s, t: String): String;
+    procedure ReplaceDateParams;
+    procedure AddTreedata;
+    procedure GetValue(fieldname, tt: String; Rowno: integer; var v, ov: String);
+    procedure FillParents(s: String);
+    procedure ReplaceHighLow(i:integer; High:Boolean);
+    function DataCompare(s1, s2, datatype: String): extended;
+    function GetDataIndex(k: Integer): integer;
+    procedure ConvertIncDec(k: integer);
+    function GetTreeIdString(idstr, idfield, recid: String): String;
+    procedure fillmstatus;
+    procedure TreeReverseValues(r: integer);
+    procedure TreeFillValues(r: integer);
+    function GetDec(Transid, FieldName: String): integer;
+    function GetFromClause(st: String): String;
+    function GetWhereClause(st: String): String;
+    function GetCompanyName(tname: String): String;
+
+  public
+    GetFieldData : TGetFieldData;
+    GetRowCount : TGetRowCount;
+    NewTrans : Boolean;
+    CompanyName : String;
+    WorkFlow : String;
+    SetInitOld, HasWorkFlow : Boolean;
+
+    procedure ClearDataList;
+    procedure DeleteRow(transid: String; FrameNo, RowNo: integer);
+    procedure Submit(Transid:String; Delete:Boolean);
+    procedure ShowDefList;
+    procedure ShowDataList(i:integer);
+    procedure DoUpdate;
+    Constructor create;
+    Destructor Destroy; override;
+    procedure LoadDef(pStruct:TStructDef);
+    function GetDefList : TList;
+    procedure SubmitOnApprove(transid: String; Delete: Boolean);
+end;
+
+implementation
+
+Constructor TMDMap.Create;
+begin
+  inherited create;
+  datalist := nil;
+  datalist := TList.create;
+  defs := nil;
+  defs := TList.create;
+  parents := nil;
+  parents := TStringList.create;
+  Treecall := false;
+  NewTrans := true;
+  new(FieldData);
+  QUAL:=nil;QUA:=nil;Upd:=nil;w:=nil;QTree:=nil;QMaxMin:=nil;Qus:=nil;
+  workflow:='';
+  SetInitOld := True;
+  HasWorkFlow := False;
+end;
+
+Destructor TMDMap.Destroy;
+var i:integer;
+begin
+  cleardatalist;
+  if Assigned(datalist) then
+  begin
+    datalist.free;
+    datalist := nil;
+  end;
+  for i:=0 to defs.count-1 do
+  begin
+    if Assigned(pdef(defs[i]).source) then
+    begin
+      pdef(defs[i]).source.Clear;
+      FreeAndNil(pdef(defs[i]).source);
+    end;
+    if Assigned(pdef(defs[i]).target) then
+    begin
+      pdef(defs[i]).target.Clear;
+      FreeAndNil(pdef(defs[i]).target);
+    end;
+    if Assigned(pdef(defs[i]).decs) then
+    begin
+      pdef(defs[i]).decs.Clear;
+      FreeAndNil(pdef(defs[i]).decs);
+    end;
+    dispose(pdef(defs[i]));
+  end;
+  if Assigned(defs) then
+  begin
+    defs.Clear;
+    defs.free;
+    defs := nil;
+  end;
+  dispose(FieldData);
+  if Assigned(parents) then
+  begin
+    parents.clear;
+    FreeAndNil(parents);
+  end;
+  if assigned(Qual) then
+  begin
+    qual.close;
+    qual.destroy;
+  end;
+  if assigned(Qua) then
+  begin
+    qua.close;
+    qua.destroy;
+  end;
+  if assigned(Qus) then
+  begin
+    qus.close;
+    qus.destroy;
+  end;
+  if assigned(upd) then
+  begin
+    upd.close;
+    upd.destroy;
+  end;
+  if assigned(w) then
+  begin
+    w.close;
+    w.destroy;
+  end;
+  if assigned(Qtree) then
+  begin
+    qtree.close;
+    qtree.destroy;
+  end;
+  if assigned(QMaxMin) then
+  begin
+    qmaxmin.close;
+    qmaxmin.destroy;
+  end;
+  inherited;
+end;
+
+Procedure TMDMap.ClearDataList;
+var i:integer;
+begin
+  for i:=0 to datalist.count-1 do
+  begin
+    if Assigned(pdata(datalist[i]).source) then
+    begin
+      pdata(datalist[i]).source.clear;
+      FreeAndNil(pdata(datalist[i]).source);
+    end;
+    if Assigned(pdata(datalist[i]).target) then
+    begin
+      pdata(datalist[i]).target.clear;
+      FreeAndNil(pdata(datalist[i]).target);
+    end;
+    if Assigned(pdata(datalist[i]).value) then
+    begin
+      pdata(datalist[i]).value.clear;
+      FreeAndNil(pdata(datalist[i]).value);
+    end;
+    if Assigned(pdata(datalist[i]).decs) then
+    begin
+      pdata(datalist[i]).decs.clear;
+      FreeAndNil(pdata(datalist[i]).decs);
+    end;
+    dispose(pdata(datalist[i]));
+  end;
+  datalist.clear;
+end;
+
+procedure TMDMap.LoadDef(pStruct:TStructDef);
+var k,frame,dec,i,j,cPos:integer;
+    mt,ms,ml,cf,af,rf:String;
+    flag : boolean;
+    mtext : ixmlnode;
+    sl : TStringList;
+begin
+  sdef:=pStruct;
+  for j:=0 to sdef.xml.documentelement.ChildNodes.Count-1 do begin
+    try
+      if sdef.xml.documentelement.ChildNodes[j].Attributes['cat']<>'mdmap' then continue;
+      map:=sdef.xml.documentelement.ChildNodes[j];
+      if (map.ChildValues[xml_extended] = 'False') then begin
+        frame := GetSourceFrame;
+        mt := lowercase(vartostr(map.ChildValues[xml_mtable]));
+        companyname := GetCompanyName(lowercase(vartostr(map.ChildValues[xml_master])));
+        if CompanyName <> '' then begin
+          cPos := Pos('.',mt);
+          if cPos > 0 then
+            mt := Trim(Copy(mt,cPos+1,Length(mt)))
+        end;
+
+        ms := lowercase(map.ChildValues[xml_msfield]);
+        if ms = 'default' then begin
+          cPos := Pos('.',mt);
+          if cpos > 0 then
+            ms := Trim(Copy(mt,cPos+1,Length(mt)))+'id'
+          else
+            ms := mt + 'id';
+        end;
+        ms := '@' + ms;
+        ml := lowercase(map.ChildValues[xml_dsfield]);
+        cf := lowercase(vartostr(map.ChildValues[xml_mdcontrol]));
+        //dec := GetDec(map.ChildValues[xml_master], map.ChildValues[xml_mfield]);
+        dec := sdef.axprovider.dbm.gf.strtointz(vartostr(map.childvalues[xml_masterfielddec]));
+        k := GetDef(lowercase(sdef.Transid), mt,ms,ml,cf);
+
+        if k = -1 then begin
+          new(def);
+          def.Transid := lowercase(sdef.transid);
+          def.Table := mt;
+          def.CompanyName := CompanyName;
+          def.ControlField := cf;
+          def.Tree := map.ChildValues[xml_tree]='True';
+          def.InitOnDel := map.ChildValues[xml_initondel]='True';
+          def.source := TStringList.create;
+          def.target := TStringList.create;
+          def.decs := TStringList.Create;
+          def.SourceFrame := Frame;
+          def.append := false;
+          def.TargetTypes := '';
+          def.TreeTable := '';
+          def.TreeLink := '';
+          def.PostOnApprove:=lowercase(vartostr(map.ChildValues[xml_onapprove]))='true';
+          def.PostOnReject:=lowercase(vartostr(map.ChildValues[xml_onreject]))='true';
+          defs.add(def);
+          k := defs.count-1;
+        end else def := defs[k];
+
+        k := def.source.indexof(ml);
+        if (k<>-1) then flag := def.target[k] <> ms else flag := true;
+        if flag then begin
+          def.TargetTypes := def.TargetTypes + GetTargetType(def.CompanyName+def.Table,copy(ms,2,100));
+          def.target.add(ms);
+          def.source.add(ml);
+          def.decs.add(inttostr(dec));
+        end;
+
+        def.source.Add(lowercase(map.ChildValues[xml_dfield]));
+        def.target.add(GetPrefix + lowercase(map.ChildValues[xml_mfield]));
+        def.decs.add(inttostr(dec));
+        def.TargetTypes := def.TargetTypes + GetTargetType(def.CompanyName+def.Table, lowercase(map.ChildValues[xml_mfield]));
+
+        ConvertIncDec(def.target.count-1);
+      end else begin
+         mtext := map.ChildNodes.FindNode(xml_MapText);
+         if not assigned(mtext) then continue;
+         sl := TStringList.Create;
+         for i := 0 to mtext.ChildNodes.Count-1 do
+           sl.Add(vartostr(mtext.ChildNodes[i].NodeValue));
+         if Trim(sl.Text) <> '' then begin
+           sl.insert(0,'{mdmap}');
+           LoadAMDMap(sl);
+         end;
+         sl.clear; sl.Free;
+         mtext := nil;
+      end;
+    Except on E:Exception do
+    begin
+      sdef.axprovider.dbm.gf.DoDebug.msg('LoadDef - '+E.message);
+      continue;
+    end;
+    end;
+  end;
+  LoadAMDMap(sdef.exprsetlist);
+end;
+
+function TMDMap.GetPrefix : String;
+begin
+  result := '';
+  if map.ChildValues[xml_type] = 'Add' then result := '+'
+  else if map.ChildValues[xml_type] = 'Less' then result := '-'
+  else if map.ChildValues[xml_type] = 'Highest' then result := '>'
+  else if map.ChildValues[xml_type] = 'Lowest' then result := '<'
+  else if map.ChildValues[xml_type] = 'Inc' then result := '^'
+  else if map.ChildValues[xml_type] = 'Dec' then result := '!'
+  else if map.ChildValues[xml_type] = 'Replace' then result := '*';
+end;
+
+function TMDMap.GetSourceFrame : integer;
+var f:String;
+    grid:Boolean;
+begin
+  result := -1;
+  if (vartostr(map.ChildValues[xml_type]) <> 'Inc') and (vartostr(map.ChildValues[xml_type]) <> 'Dec') then begin
+    f := vartostr(map.ChildValues[xml_dfield]);
+    fld:=sdef.GetField(f);
+    if (fld = nil )then
+      Raise EDataBaseError.Create('DetailField of MdMap does not exist');
+
+    result := fld.FrameNo;
+    grid := fld.AsGrid
+  end else begin
+    grid := false;
+    result := 1;
+  end;
+
+  f := vartostr(map.ChildValues[xml_dsfield]);
+  fld:=sdef.GetField(f);
+  if (fld = nil )then
+    Raise EDataBaseError.Create('DetailSearchField of MdMap does not exist');
+
+  if (fld.AsGrid) and (not grid) then begin
+    result := fld.frameno;
+    grid := true;
+  end;
+
+  f := vartostr(map.ChildValues[xml_mdcontrol]);
+  if f <> '' then begin
+    fld:=sdef.GetField(f);
+
+    if (fld = nil )then
+      Raise EDataBaseError.Create('ControlField of MdMap does not exist');
+
+    if (fld.AsGrid) and (not grid) then begin
+      result := fld.FrameNo;
+      grid := true;
+    end;
+  end;
+end;
+
+function TMDMap.GetDef(Transid,mt, ms, ml, cf:String):integer;
+var i,j:integer;
+begin
+  result := -1;
+  for i:=0 to defs.count-1 do begin
+    def := pdef(defs[i]);
+    if (def.table = mt) and (def.transid = transid) and (def.controlfield = cf) then begin
+      for j:=0 to def.source.count-1 do begin
+        if (def.target[j] = ms) and (def.source[j] = ml) then begin
+          result := i;
+          exit;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TMDMap.LoadAMDMap(elist:TStringList);
+var i:integer;
+    s:String;
+    flag : boolean;
+begin
+  flag := false;
+  mtransid := '';
+  for i:=0 to elist.count-1 do begin
+    s:=elist[i];
+    if s = '' then continue;
+    if copy(s,1,2) = '//' then continue;
+    if flag then begin
+      if copy(s,1,1) = '{' then begin
+        if flag then SetTargetTypes;
+        flag := false;
+      end else AddToDefs(s);
+    end;
+    if copy(s,1,6) = '{mdmap' then begin
+      flag := true;
+      new(def);
+      def.source := TStringList.create;
+      def.target := TStringList.create;
+      def.decs := TStringList.Create;
+      def.append := false;
+      def.InitOnDel := false;
+      def.Tree := false;
+      def.PostOnApprove:=lowercase(vartostr(map.ChildValues[xml_onapprove]))='true';
+      def.PostOnReject:=lowercase(vartostr(map.ChildValues[xml_onreject]))='true';
+      defs.add(def);
+    end;
+  end;
+  if flag then SetTargetTypes;
+end;
+
+procedure TMDMap.AddToDefs(S:String);
+var p,dec : integer;
+    ls, rs, rs1, rs2 : String;
+begin
+  ls := '';
+  rs := '';
+  splitstring(s,ls,rs);
+  if ls = 'transid' then def.transid := lowercase(rs)
+  else if ls = 'sourceframe' then def.sourceframe := strtoint(rs)
+  else if ls = 'tablename' then def.table := rs
+  else if ls = 'mastertransid' then mtransid := rs
+  else if ls = 'controlfield' then def.ControlField := rs
+  else if ls = 'append' then begin
+    if lowercase(rs)='true' then def.append := true else def.append := false;
+  end else if ls = 'treeupdate' then begin
+    if lowercase(rs)='true' then def.Tree := true else def.tree := false;
+  end else if ls = 'treetable' then def.treetable := rs
+  else if ls = 'treelink' then def.treelink := rs
+  else if ls = 'initondel' then begin
+    if lowercase(rs)='true' then def.InitOnDel := true else def.initondel := false;
+  end else begin
+    def.target.add(ls);
+    rs1 := sdef.axprovider.dbm.gf.getnthstring(rs,1);
+    rs2 := trim(sdef.axprovider.dbm.gf.getnthstring(rs,2));
+    def.source.add(rs1);
+    dec := 0;
+    //if (mtransid <> '') then dec := getdec(mtransid, ls);
+    if rs2 <> '' then begin
+      if lowercase(rs2) = '_currdecimal' then dec := sdef.axprovider.dbm.gf._currdecimal
+      else dec := strtoint(rs2);
+    end;
+    def.decs.add(inttostr(dec));
+    convertIncDec(def.target.count-1);
+  end;
+end;
+
+procedure TMDMap.ConvertIncDec(k:integer);
+var s:String;
+begin
+  s := def.target[k];
+  if (s[1] = '^') then begin
+    s[1] := '+';
+    def.target[k] := s;
+    def.source[k] := '__autoinc';
+  end else if (s[1] = '!') then begin
+    s[1] := '+';
+    def.target[k] := s;
+    def.source[k] := '__autodec';
+  end;
+end;
+
+procedure TMDMap.DeleteRow(transid:String;FrameNo, RowNo:integer);
+var i,r,rcount:integer;
+    s1, s2 : String;
+begin
+  Positive := false;
+  transid := lowercase(transid);
+  for i:=0 to defs.count-1 do begin
+    def := pdef(defs[i]);
+    if def.transid <> transid then continue;
+    if def.sourceframe <> frameno then continue;
+    r := rowno;
+    s1 := '';
+    s2 := '';
+    Positive := false;
+    GetIdStrings(r, s1, s2);
+    if (s1 = '') and (s2='') then continue;
+    AddToData(s1, r);
+    if s2 <> '' then begin
+      Positive := false;
+      AddToData(s2, r);
+    end;
+  end;
+end;
+
+procedure TMDMap.Submit(transid:String;Delete:Boolean);
+var i,r,rcount:integer;
+    s1, s2 : String;
+    proceed : Boolean;
+begin
+  Positive := not delete;
+  transid := lowercase(transid);
+  for i:=0 to defs.count-1 do begin
+    def := pdef(defs[i]);
+    if def.transid <> transid then continue;
+
+    InitOld:=false;
+    if not HasWorkFlow then
+      proceed := True
+    else begin
+      if (def.PostOnApprove) or (def.PostOnReject) then begin
+        if def.PostOnApprove then begin
+          if def.PostOnReject then  begin
+            if (WorkFlow<>'approve') and (Workflow<>'reject')then continue
+          end else
+            if (WorkFlow<>'approve') then continue;
+          initold:=SetInitOld;
+          proceed := True;
+        end;
+        if def.PostOnReject then begin
+          if def.PostOnApprove then begin
+            if (WorkFlow<>'approve') and (Workflow<>'reject')then continue
+          end else
+            if (WorkFlow<>'reject') then continue;
+          initold:=SetInitOld;
+          proceed := True;
+        end;
+      end else if ((not def.PostOnApprove) and (not def.PostOnReject)) or (Workflow='') then proceed := True;
+    end;
+    if not proceed  then continue;
+
+    rcount := getrowcount(def.sourceframe);
+    for r:=1 to rcount do begin
+      s1 := '';
+      s2 := '';
+      Positive := not delete;
+      GetIdStrings(r, s1, s2);
+      if (s1 = '') and (s2='') then continue;
+      LinkChanged := s2 <> '';
+      AddToData(s1, r);
+      Positive := not delete;
+      if s2 <> '' then begin
+        Positive := false;
+        AddToData(s2, r);
+      end;
+    end;
+  end;
+end;
+
+procedure TMDMap.AddTreedata;
+var i,k,j,cPos:integer;
+    p:boolean;
+    s1,s2,s:String;
+begin
+  parents.clear;
+  if def.treelink = '' then begin
+    cPos := Pos('.',def.table);
+    if cPos > 0 then
+      s := lowercase(Trim(Copy(def.table,cPos+1,Length(def.table))))+'id'
+    else
+      s := lowercase(def.table)+'id'
+  end else s := lowercase(def.treelink);
+  j := def.target.indexof('@'+s);
+  if j=-1 then exit;
+  FillParents(data.value[j]);
+  p := positive;
+  TreeCall := true;
+  sdata := data;
+  for i:=0 to parents.count-1 do begin
+    positive := p;
+    parentid := parents[i];
+    s1 := sdata.sqlstring;
+    s1 := GetTreeIdString(s1, s, parentid);
+
+    k := RecFound(s1);
+    if k = -1 then begin
+      new(data);
+      data.SQLString := s1;
+      data.table := sdata.table;
+      data.TargetTypes := sdata.TargetTypes;
+      data.target := TStringList.create;
+      data.source := TStringList.create;
+      data.decs := TStringList.Create;
+      data.value := TStringList.create;
+      data.target.assign(sdata.target);
+      data.source.assign(sdata.source);
+      data.value.assign(sdata.value);
+      data.decs.Assign(sdata.decs);
+      data.value[j] := parentid;
+      data.def := def;
+      data.Positive := positive;
+      fillmstatus;
+      data.Append := sdata.Append;
+      data.NoChange := sdata.NoChange;
+      datalist.add(data);
+    end else begin
+      data := pData(datalist[k]);
+      if positive then FillValues(0) else ReverseValues(0);
+    end;
+  end;
+  data := sdata;
+  treecall := false;
+end;
+
+procedure TMDMap.fillmstatus;
+var i:integer;
+begin
+  for i:=0 to data.target.count-1 do begin
+    if lowercase(copy(data.target[i],2, 100)) = 'mstatus' then
+      data.value[i] := 'g';
+  end;
+end;
+
+function TMDMap.GetTreeIdString(idstr, idfield, recid:String):String;
+var p1,p2 :integer;
+    s : String;
+begin
+  p1 := pos(idfield+'=',idstr);
+  if p1 = 0 then exit;
+  p1 := p1+length(idfield)+1;
+
+  s := trim(copy(idstr, p1, 1000));
+  p2 := pos(' ', s);
+  if p2 = 0 then p2 := length(s);
+  delete(idstr, p1, p2);
+  insert(recid+' ', idstr, p1);
+  result := idstr;
+end;
+
+procedure TMDMap.FillParents(s:String);
+var i,cpos:integer;
+    v,t,idf:String;
+begin
+  Parents.clear;
+  QTree := sdef.axprovider.dbm.GetXDS(qtree);
+  QTree.buffered := True;
+  if def.TreeTable = '' then t:= def.Table else t := def.TreeTable;
+  cPos := Pos('.',t);
+  if cPos > 0 then
+    idf := lowercase(Trim(Copy(t,cPos+1,Length(t))))+'id'
+  else
+    idf := t+'id';
+  QTree.CDS.CommandText := 'Select * from '+t+' where '+idf+'='+s;
+  QTree.open;
+  if QTree.CDS.IsEmpty then exit;
+  for i:=1 to 100 do begin
+    if not assigned(QTree.CDS.fieldbyname('mparent'+inttostr(i))) then break;
+    v := QTree.CDS.fieldbyname('mparent'+inttostr(i)).asstring;
+    if v='0' then break;
+    Parents.add(v);
+  end;
+end;
+
+procedure TMDMap.GetIdStrings(rowno:integer; var s1, s2:String);
+var i : integer;
+    s, sf, tf, tablename, v, ov, tt : String;
+    flag : boolean;
+begin
+  s1 := ' ';
+  s2 := ' ';
+  tablename := lowercase(def.companyname+trim(def.table));
+  flag := false;
+
+  for i:=0 to def.source.count-1 do begin
+    sf := def.source[i];
+    tf := def.target[i];
+    tt := def.targettypes[i+1];
+    if tf[1]<>'@' then continue;
+    tf := lowercase(copy(tf,2,100));
+
+    if (treecall) and (def.treelink = '') then begin
+      v := parentid;
+      ov := '';
+    end else begin
+      v :='';
+      ov := '';
+      GetValue(sf, tt, Rowno, v, ov);
+      if (v='') and (ov='') then continue;
+      v := ConvertParam(V, tt);
+      if ov <> '' then
+        ov := ConvertParam(ov, tt);
+      if tt = 'n' then begin
+        if v = '0' then v := '';
+        if ov = '0' then ov := '';
+      end;
+    end;
+
+    if (v <> '') and (pos(' '+tf+'='+v+' ', s1) = 0) then
+      s1 := s1 + tf + '=' + v + ' and ';
+    if (ov <> '') and (v <> ov) then begin
+      flag := true;
+      if pos(' '+tf+'='+ov+' ', s2) = 0 then
+        s2 := s2 + tf + '=' + ov + ' and ';
+    end else if pos(' '+tf+'='+v+' ', s2) = 0 then
+      s2 := s2 + tf + '=' + v + ' and ';
+  end;
+  if s1 = ' ' then s1 := '' else s1 := tablename + ' where ' + copy(s1,1,length(s1)-5);
+  if flag then
+    s2 := tablename + ' where ' + copy(s2,1,length(s2)-5)
+  else
+    s2 := '';
+end;
+
+Procedure TMDMap.GetValue(fieldname, tt:String;Rowno:integer;var v,ov:String);
+begin
+  GetFieldData(fieldname, RowNo, FieldData);
+  if (fielddata.datatype = 'c') and (tt = 'n') then begin
+    if not positive then begin
+      v := FloatToStr(FieldData.OldId);
+      ov := '';
+    end else begin
+      v := FloatToStr(FieldData.id);
+      if FieldData.OldId = 0 then ov := '' else ov := FloatToStr(FieldData.OldId);
+    end;
+  end else begin
+    if not positive then begin
+      v := FieldData.OldValue;
+      ov := '';
+    end else begin
+      v := FieldData.value;
+      ov := FieldData.OldValue;
+    end;
+  end;
+end;
+
+function TMDMap.RecFound(s:String):integer;
+var i:integer;
+begin
+  result := -1;
+  for i:=0 to datalist.count-1 do begin
+    if pData(datalist[i]).sqlstring = s then begin
+      result := i;
+      exit;
+    end;
+  end;
+end;
+
+procedure TMDMap.AddToData(searchstr:String; r:Integer);
+var i,k:integer;
+begin
+  data := nil;
+  ControlChanged := false;
+  if def.controlfield <> '' then begin
+    GetFieldData(def.controlfield, r, fielddata);
+    if not positive then begin
+      if lowercase(fielddata.oldvalue) = 'f' then exit;
+    end else begin
+      if (lowercase(fielddata.value) = 'f') then begin
+        if (LinkChanged) or (lowercase(fielddata.oldvalue) = 'f') or (lowercase(fielddata.oldvalue) = '') then exit;
+        positive := false;
+      end;
+      ControlChanged := lowercase(fielddata.value) <> lowercase(fielddata.oldvalue);
+    end;
+  end;
+
+  k := RecFound(SearchStr);
+  if k = -1 then begin
+    new(data);
+    Data.SQLString := searchstr;
+    data.source := TStringList.create;
+    data.target := TStringList.create;
+    data.value := TStringList.create;
+    data.decs := TStringList.Create;
+    data.source.assign(def.source);
+    data.target.assign(def.target);
+    data.decs.assign(def.decs);
+    data.table := def.table;
+    data.Append := def.Append;
+    data.NoChange := false;
+    data.TargetTypes := def.TargetTypes;
+    data.def := def;
+    data.Positive := Positive;
+    for i:=0 to data.source.count-1 do data.value.add('');
+    datalist.add(data);
+    k := datalist.count-1;
+  end else data := pData(datalist[k]);
+  if positive then FillValues(r) else ReverseValues(r);
+end;
+
+function TMDMap.GetDataIndex(k:Integer):integer;
+var i:integer;
+begin
+  result := -1;
+  for i:=0 to data.source.count-1 do begin
+    if (def.source[k] = data.source[i]) and (def.target[k] = data.target[i]) then begin
+      result := i;
+      exit;
+    end;
+  end;
+  data.source.add(def.source[k]);
+  data.target.add(def.target[k]);
+  data.decs.Add(def.decs[k]);
+  data.value.add('');
+  data.TargetTypes := data.TargetTypes + def.TargetTypes[k+1];
+  result := data.source.count-1;
+end;
+
+procedure TMDMap.FillValues(r:integer);
+var i,k,c,dec : integer;
+    s, typ : String;
+    fv : Extended;
+begin
+  if treecall then begin
+    treefillvalues(r);
+    exit;
+  end;
+  c := def.source.count-1;
+  for k:=0 to c do begin
+    i := GetDataIndex(k);
+    GetFieldData(data.source[i], r, fielddata);
+    if (controlChanged) or (LinkChanged) or (InitOld) then
+      fielddata.oldvalue := '';
+    typ := data.TargetTypes[i+1];
+    s := data.target[i];
+    dec := strtoint(data.decs[i]);
+    if s[1] = '@' then begin
+      if (typ = 'n') and (fielddata.datatype = 'c') then
+        data.value[i] := floattostr(fielddata.id)
+      else
+        data.value[i] := fielddata.Value;
+    end else if s[1] = '+' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) + sdef.axprovider.dbm.gf.strtofloatz(fielddata.value) - sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);
+    end else if s[1] = '-' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) - sdef.axprovider.dbm.gf.strtofloatz(fielddata.value) + sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);
+    end else if s[1] = '>' then begin
+      s := data.value[i];
+      if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+      if Datacompare(fielddata.value, s, data.targettypes[i+1]) > 0 then
+        data.value[i] := fielddata.value;
+    end else if s[1] = '<' then begin
+      s := data.value[i];
+      if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+      if (s='') or (Datacompare(fielddata.value, s, data.targettypes[i+1]) < 0) then
+        data.value[i] := fielddata.value;
+    end else if s[1] = '*' then
+      data.value[i] := fielddata.value;
+  end;
+end;
+
+procedure TMDMap.TreeFillValues(r:integer);
+var i,k,c,dec : integer;
+    s, typ : String;
+    fv : Extended;
+begin
+
+  c := data.source.count-1;
+  for i:=0 to c do begin
+    fielddata.value := sdata.value[i];
+    fielddata.oldvalue := '';
+    typ := data.TargetTypes[i+1];
+    s := data.target[i];
+    dec := strtoint(data.decs[i]);
+    if s[1] = '@' then begin
+      continue;
+    end else if s[1] = '+' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) + sdef.axprovider.dbm.gf.strtofloatz(fielddata.value) - sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);
+    end else if s[1] = '-' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) - sdef.axprovider.dbm.gf.strtofloatz(fielddata.value) + sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);
+    end else if s[1] = '>' then begin
+      s := data.value[i];
+      if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+      if Datacompare(fielddata.value, s, data.targettypes[i+1]) > 0 then
+        data.value[i] := fielddata.value;
+    end else if s[1] = '<' then begin
+      s := data.value[i];
+      if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+      if (s='') or (Datacompare(fielddata.value, s, data.targettypes[i+1]) < 0) then
+        data.value[i] := fielddata.value;
+    end else if s[1] = '*' then
+      data.value[i] := fielddata.value;
+  end;
+end;
+
+procedure TMDMap.ReverseValues(r:integer);
+var i,k,c,dec : integer;
+    s : String;
+    fv, ofv, v  : extended;
+begin
+  if treecall then begin
+    TreeReverseValues(r);
+    exit;
+  end;
+  c := def.source.count-1;
+  for k:=0 to c do begin
+    i := GetDataIndex(k);
+    GetFieldData(data.source[i], r, fielddata);
+    s := data.target[i];
+    dec := strtoint(data.decs[i]);
+    if s[1] = '@' then begin
+      if (data.targettypes[i+1] = 'n') and (fielddata.datatype = 'c') then
+        data.value[i] := floattostr(fielddata.oldid)
+      else
+        data.value[i] := fielddata.oldValue;
+    end else if s[1] = '+' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) - sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);;
+    end else if s[1] = '-' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) + sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);;
+    end else if s[1] = '>' then begin
+      s := data.value[i];
+      if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+      if Datacompare(fielddata.oldvalue, s, data.targettypes[i+1]) > 0 then
+        data.value[i] := '~@*' + fielddata.oldvalue;
+    end else if s[1] = '<' then begin
+      s := data.value[i];
+      if s = '' then data.value[i] := '~@*' + fielddata.oldvalue
+      else begin
+        if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+        if Datacompare(fielddata.oldvalue, s, data.targettypes[i+1]) < 0 then
+          data.value[i] := '~@*' + fielddata.oldvalue;
+      end;
+    end else if s[1] = '*' then begin
+      if def.initondel then begin
+        data.value[i] := '';
+        data.NoChange := false;
+      end else data.nochange := true;
+    end;
+  end;
+end;
+
+procedure TMDMap.TreeReverseValues(r:integer);
+var i,k,c,dec : integer;
+    s : String;
+    fv, ofv, v  : extended;
+begin
+  c := data.source.count-1;
+  for i:=0 to c do begin
+    s := data.target[i];
+    fielddata.oldvalue := sdata.value[i];
+    dec := strtoint(data.decs[i]);
+    fielddata.value := '';
+    if s[1] = '@' then begin
+      continue;
+    end else if s[1] = '+' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) + sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);
+    end else if s[1] = '-' then begin
+      fv := sdef.axprovider.dbm.gf.strtofloatz(data.value[i]) - sdef.axprovider.dbm.gf.strtofloatz(fielddata.OldValue);
+      data.value[i] := floattostrf(fv, ffFixed, 15, dec);
+    end else if s[1] = '>' then begin
+      s := data.value[i];
+      if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+      if Datacompare(fielddata.oldvalue, s, data.targettypes[i+1]) > 0 then
+        data.value[i] := '~@*' + fielddata.oldvalue;
+    end else if s[1] = '<' then begin
+      s := data.value[i];
+      if s = '' then data.value[i] := '~@*' + fielddata.oldvalue
+      else begin
+        if copy(s,1,3) = '~@*' then s := copy(s,4,1000);
+        if Datacompare(fielddata.oldvalue, s, data.targettypes[i+1]) < 0 then
+          data.value[i] := '~@*' + fielddata.oldvalue;
+      end;
+    end else if s[1] = '*' then begin
+      if def.initondel then begin
+        data.value[i] := '';
+        data.NoChange := false;
+      end else data.nochange := true;
+    end;
+  end;
+end;
+
+procedure TMDMap.DoUpdate;
+var i, tries:integer;
+begin
+  //Updating datalist for parent update in case of tree update
+  for i:=0 to datalist.Count-1 do begin
+    data := pData(DataList[i]);
+    def := pdef(data.def);
+    positive := data.positive;
+    if def.tree then AddTreeData;
+  end;
+  //ShowDataList;
+  for i:=0 to datalist.count-1 do begin
+    data := pData(datalist[i]);
+    if data.SQLString = '' then continue;
+    ShowDataList(i);
+    UpdateOrAdd;
+  end;
+  ClearDataList;
+end;
+Procedure TMDMap.UpdateOrAdd;
+var i,p : integer;
+    fv, lno : extended;
+    s,tf,v,f,fromstr, wherestr, typ, stext : String;
+begin
+  fromstr:=getfromclause(data.sqlstring);
+  wherestr:=getwhereclause(data.sqlstring);
+  QUAL := sdef.axprovider.Dbm.GetXDS(qual);
+  QUA := sdef.axprovider.dbm.GetXDS(qua);
+  QUS := sdef.axprovider.dbm.GetXDS(qus);
+  QUS.buffered := True;
+  QUS.CDS.CommandText := 'SELECT * FROM '+data.SQLString;
+  if sdef.axprovider.dbm.gf.dbase<>'access' then begin
+    QUAL.buffered := True;
+    if sdef.axprovider.dbm.Connection.DbType = 'ms sql' then
+    begin
+      stext:=Qus.cds.commandtext;
+      p:=pos(' where ', stext );
+      if p>0 then begin
+        insert(sdef.axprovider.dbm.gf.forupdate,stext,p);
+        QUAL.CDS.CommandText := stext;
+      end;
+    end else
+      QUAL.CDS.CommandText := QUS.CDS.CommandText + sdef.axprovider.dbm.gf.forupdate;
+    Qual.open;
+    QUS.open;
+  end else begin
+    QUS.open;
+  end;
+  lno := -1;
+  if (Qus.CDS.isempty) then begin
+    if not data.append then begin
+      Qus.close;
+      if sdef.axprovider.dbm.gf.dbase <> 'access' then qual.close;
+      exit;
+    end;
+    qua.append(fromstr);
+    for i:=0 to Qus.CDS.fields.Count-1 do begin
+      If (qus.CDS.Fields[i].DataType = ftInteger) or (qus.CDS.Fields[i].DataType = ftFloat) or (qus.CDS.Fields[i].DataType = ftFMTBCD)or (qus.CDS.Fields[i].DataType = ftFMTBCD)  Then begin
+        f:=qus.CDS.Fields[i].FieldName;
+        qua.submit(f, '0', 'n');
+      end;
+    end;
+    for i:=0 to data.target.count-1 do begin
+      s := data.target[i];
+      if s[1] <> '@' then continue;
+      tf := copy(s,2,100);
+      v := data.value[i];
+      typ:=data.TargetTypes[i+1];
+      qua.submit(tf, v, typ);
+    end;
+  end else begin
+    Qua.edit(fromstr, wherestr);
+  end;
+
+  for i:=0 to data.target.count-1 do begin
+    s := data.target[i];
+    tf := copy(s,2,100);
+    v := data.value[i];
+    if s[1] = '+' then begin
+      if v <> '' then fv := strtofloat(v) else fv := 0;
+      qua.Submit(tf, floattostrf(qus.CDS.fieldbyname(tf).asfloat + fv, ffFixed, 15, strtoint(data.decs[i])), 'n');
+    end else if s[1] = '-' then begin
+      if v <> '' then fv := strtofloat(v) else fv := 0;
+      qua.Submit(tf, floattostrf(qus.CDS.fieldbyname(tf).asfloat + fv, ffFixed, 15, strtoint(data.decs[i])), 'n');
+    end else if s[1] = '>' then begin
+      ReplaceHighLow(i, true);
+    end else if s[1] = '<' then begin
+      ReplaceHighLow(i, false);
+    end else if s[1] = '*' then begin
+      typ:=data.TargetTypes[i+1];
+      if not data.NoChange then qua.submit(tf,v,typ);
+    end;
+  end;
+  qua.post;
+  qua.close;
+  qus.close;
+  if sdef.axprovider.dbm.gf.dbase<>'access' then
+    qual.close;
+end;
+
+function TMDMap.GetFromClause(st:String):String;
+var p1,p2:integer;
+begin
+  result:='';
+  p1:=pos(' where ', st);
+  if p1=0 then p1 := length(st);
+  result:=trim(leftstr(st,p1));
+end;
+
+function TMDMap.GetWhereClause(st:String):String;
+var p1:integer;
+begin
+  result:='';
+  p1:=pos(' where ', st);
+  if p1=0 then exit;
+  p1 := p1+7;
+  result:=copy(st,p1,5000);
+end;
+
+procedure TMDMap.ReplaceDateParams;
+var vn,s,n:String;
+    p,c,i,k:integer;
+begin
+  s := data.sqlstring;
+  k:=0;
+  while true do begin
+    p := pos('datevalue(', s);
+    if p = 0 then break;
+    vn := '';
+    c := 10;
+    for i:=p+10 to length(s) do begin
+      if s[i] = ')' then begin
+        inc(c);
+        break;
+      end;
+      vn := vn + s[i];
+      inc(c);
+    end;
+    inc(k);
+    delete(s, p, c);
+    insert(':p'+inttostr(k), s, p);
+  end;
+  Qua.SQL.Text := 'SELECT * FROM '+s;
+  Qua.GetParamNames;
+  for i:=1 to k do begin
+    n := qua.ParamNames[i-1];
+    s := trim(sdef.axprovider.dbm.gf.getnthstring(vn,i));
+    qua.parambyname(n).asdatetime := strtodatetime(s);
+  end;
+end;
+
+procedure TMDMap.SplitString(S:String; var ls,rs:String);
+var p:integer;
+begin
+  p := pos('=', s);
+  if p=0 then raise EDatabaseError.Create('Improper Map definition'+s);
+  ls := trim(copy(s,1,p-1));
+  rs := trim(copy(s,p+1,100));
+end;
+
+function TMDMap.GetTargetType(TableName, FieldName:String):String;
+var TblName : String;
+    cPos : Integer;
+begin
+  cPos := Pos('.',tablename);
+  if cPos > 0 then
+    TblName := Trim(copy(tablename,cpos+1,length(tablename)))
+  else
+    TblName := tablename;
+  w:=sdef.axprovider.dbm.GetXDS(w);
+  w.buffered := True;
+  w.CDS.CommandText := 'select '+fieldname+' from '+tablename+' where '+TblName+'id=0';
+  w.open;
+  if (w.CDS.fields[0].DataType = ftfloat) or (w.CDS.fields[0].DataType = ftInteger) or (w.CDS.fields[0].DataType = ftBCD) or (w.CDS.fields[0].DataType = ftFMTBCD) then
+    result := 'n'
+  else if (w.CDS.fields[0].DataType = ftDate) or (w.CDS.fields[0].DataType = ftDateTime) or (w.CDS.fields[0].DataType=ftTimeStamp) then
+    result := 'd'
+  else
+    result := 'c';
+  w.close;
+end;
+
+function TMDMap.GetDec(Transid, FieldName:String):integer;
+begin
+  w:=sdef.axprovider.dbm.getxds(w);
+  w.buffered := True;
+  w.CDS.CommandText := 'select decimals from prms where '+sdef.axprovider.dbm.gf.sqllower+'(transid)=:t and '+sdef.axprovider.dbm.gf.sqllower+'(name)=:f';
+//  w.parambyname('t').asstring := lowercase(transid);
+//  w.parambyname('f').asstring := lowercase(fieldname);
+  w.AssignParam(0,transid,'c');
+  w.AssignParam(1,lowercase(fieldname),'c');
+  w.open;
+  if w.isempty then result := 0 else result := w.fields[0].asinteger;
+  w.close;
+end;
+
+
+procedure TMDMap.SetTargetTypes;
+var f:String;
+    i:integer;
+begin
+
+  f := copy(def.target[0],2,100);
+  w:=sdef.axprovider.dbm.GetXDS(w);
+  w.close;
+  w.buffered := True;
+  w.CDS.CommandText := 'select * from '+def.CompanyName+def.table+' where '+f+'=:v';
+//  w.parambyname('v').asstring := '';
+  w.AssignParam(0,'','c');
+  try
+  w.open;
+  except on e:Exception do
+    begin
+      if assigned(sdef) then  sdef.axprovider.dbm.gf.DoDebug.Log(sdef.axprovider.dbm.gf.Axp_logstr+'\uMDMap\SetTargetTypes - '+e.Message);
+    //w.parambyname('v').asfloat := 0;
+      w.AssignParam(0,'0','n');
+      try
+        w.open
+      except
+        if assigned(sdef) then  sdef.axprovider.dbm.gf.DoDebug.Log(sdef.axprovider.dbm.gf.Axp_logstr+'\uMDMap\SetTargetTypes - '+e.Message);
+        w.AssignParam(0, sdef.axprovider.dbm.gf.DummyDate,'d');
+        //w.parambyname('v').asdatetime := strtodatetime('01/01/1900');
+        w.open;
+      end;
+    end;
+  end;
+  def.targettypes := '';
+  for i:=0 to def.target.count-1 do begin
+    f := copy(def.target[i],2,100);
+    if (w.CDS.fieldbyname(f).DataType = ftfloat) or (w.CDS.fieldbyname(f).DataType = ftInteger) or (w.CDS.fieldbyname(f).DataType = ftBCD) or (w.CDS.fieldbyname(f).DataType = ftFMTBCD) then
+      def.targettypes := def.targettypes + 'n'
+    else if (w.CDS.fieldbyname(f).DataType = ftDate) or (w.CDS.fieldbyname(f).DataType = ftDateTime) or (w.CDS.fieldbyname(f).DataType=ftTimeStamp) then
+      def.targettypes := def.targettypes + 'd'
+    else
+      def.targettypes := def.targettypes + 'c';
+  end;
+end;
+
+function TMDMap.convertparam(s,t:String):String;
+var d : tdatetime;
+begin
+  if t = 'n' then result :=s
+  else if t = 'c' then result := quotedstr(s)
+  else if t = 'd' then begin
+    if s = '' then d := strtodatetime(sdef.axprovider.dbm.gf.DummyDate) else d := strtodatetime(s);
+    result := sdef.axprovider.dbm.gf.findandreplace(sdef.axprovider.dbm.gf.dbdatestring, ':value', sdef.axprovider.dbm.gf.ConvertToDBDateTime(sdef.axprovider.dbm.Connection.dbtype,d));
+  end;
+end;
+
+procedure TMDMap.ReplaceHighLow(i:integer; High:Boolean);
+var sfield,tabname,tf,v,svalue,tt, ws : String;
+    j :integer;
+begin
+  tf := copy(data.target[i],2,100);
+  if copy(data.value[i],1, 3) <> '~@*' then begin
+    if High then begin
+      if datacompare(data.value[i], qus.CDS.fieldbyname(tf).asstring, data.targettypes[i+1]) > 0 then
+        qua.submit(tf,data.value[i],'c');
+    end else begin
+      if qus.CDS.fieldbyname(tf).asstring = '' then
+        qua.submit(tf,data.value[i],'c')
+      else if datacompare(data.value[i], qus.CDS.fieldbyname(tf).asstring, data.targettypes[i+1]) < 0 then
+        qua.submit(tf,data.value[i],'c');
+    end;
+  end else begin
+    v := copy(data.value[i],4,1000);
+    if v = qus.CDS.fieldbyname(tf).asstring then begin
+      sfield := '';
+      for j:=0 to data.target.count-1 do begin
+        if data.target[j][1] = '@' then begin
+          sfield := data.source[j];
+          svalue := data.value[j];
+          tt := data.TargetTypes[j+1];
+          break;
+        end;
+      end;
+      if sfield = '' then exit;
+      GetFieldData(data.source[i], 1, FieldData);
+      tabname := FieldData.table;
+      if tabname = '' then exit;
+      svalue := ConvertParam(svalue,tt);
+      QMaxMin := sdef.axprovider.dbm.GetXDS(QMaxMin);
+      QMaxMin.buffered := True;
+      ws := ' where ';
+      if sdef.axprovider.FieldFound('cancel',tabname) then
+        ws := ws + ' cancel <> ''T'' and ';
+      ws := ws + sfield+'='+svalue;
+      if High then
+        QMaxMin.CDS.CommandText := 'select max('+data.source[i]+') from '+tabname+ ws
+      else
+        QMaxMin.CDS.CommandText := 'select min('+data.source[i]+') from '+tabname+ ws;
+      QMaxMin.Open;
+      qua.submit(tf,QMaxMin.CDS.fields[0].asstring,'c');
+    end;
+  end;
+end;
+
+function TMDMap.DataCompare(s1,s2,datatype:String):extended;
+var f1, f2 : extended;
+    d1, d2 : TDateTime;
+begin
+  result := 0;
+  if datatype = 'n' then begin
+    if s1 <> '' then f1 := strtofloat(s1) else f1 := 0;
+    if s2 <> '' then f2 := strtofloat(s2) else f2 := 0;
+    result := f1-f2;
+  end else if datatype = 'd' then begin
+    if s1 <> '' then d1 := strtodatetime(s1) else d1 := StrToDatetime(sdef.axprovider.dbm.gf.DummyDate);
+    if s2 <> '' then d2 := strtodatetime(s2) else d2 := StrToDatetime(sdef.axprovider.dbm.gf.DummyDate);
+    result := d1-d2;
+  end else
+    if s1 < s2 then result := -1 else if s1 > s2 then result := 1;
+end;
+
+procedure TMDMap.ShowDefList;
+var i,j:integer;
+    s:String;
+begin
+  for i:=0 to defs.count-1 do begin
+    def := pDef(defs[i]);
+    s := 'Source Transid = '+def.Transid+', SourceFrame='+IntToStr(def.sourceframe)+', Table='+def.CompanyName+def.table+', Control='+def.controlfield;
+    if def.append then s := s + ', Append';
+    if def.tree then s := s + ', TreeUpdate';
+    sdef.axprovider.dbm.gf.DoDebug.msg(s);
+    for j:=0 to def.target.count-1 do
+      sdef.axprovider.dbm.gf.DoDebug.msg(def.target[j] + '='+def.source[j]+' Datatype = '+def.Targettypes[j+1]+' dec = '+def.decs[j]);
+  end;
+end;
+
+procedure TMDMap.ShowDataList(i:integer);
+var j:integer;
+    s:String;
+    dta : pData;
+begin
+  sdef.axprovider.dbm.gf.DoDebug.msg('>>Posting MD Maps : ');
+  //for i:=0 to datalist.count-1 do begin
+    dta := pData(datalist[i]);
+    s := 'Select * from '+ dta.table + ' where '+dta.sqlstring;
+    sdef.axprovider.dbm.gf.DoDebug.msg(s);
+    for j:=0 to dta.target.count-1 do
+      sdef.axprovider.dbm.gf.DoDebug.msg(dta.target[j] + '='+dta.value[j]);
+  //end;
+end;
+
+function TMDMap.GetCompanyName(tname:String):String;
+var cQry : TXDS;
+begin
+  result := '';
+  cQry:= sdef.axprovider.dbm.GetXDS(nil);
+  cQry.buffered := True;
+  cQry.CDS.CommandText := 'select distinct(schemaname) from axschema where '+sdef.axprovider.dbm.gf.sqllower+'(transid)='+quotedstr(lowercase(tname));
+  cQry.open;
+  if cQry.CDS.IsEmpty then exit;
+  result := Trim(cQry.CDS.FieldByName('schemaname').asstring)+'.';
+  cQry.Close; cQry.Free;
+end;
+
+function TMDMap.GetDefList : TList;
+begin
+  Result := Defs;
+end;
+
+procedure TMDMap.SubmitOnApprove(transid:String;Delete:Boolean);
+var i,r,rcount:integer;
+    s1, s2 : String;
+    proceed : Boolean;
+begin
+  Positive := not delete;
+  transid := lowercase(transid);
+  for i:=0 to defs.count-1 do begin
+    def := pdef(defs[i]);
+    if def.transid <> transid then continue;
+    InitOld:=false;
+    proceed := false;
+    if (def.PostOnApprove) or (def.PostOnReject) then begin
+      if def.PostOnApprove then begin
+        if def.PostOnReject then  begin
+          if (WorkFlow<>'approve') and (Workflow<>'reject')then continue
+        end else
+          if (WorkFlow<>'approve') then continue;
+        initold:=SetInitOld;
+        proceed := True;
+      end;
+      if def.PostOnReject then begin
+        if def.PostOnApprove then begin
+          if (WorkFlow<>'approve') and (Workflow<>'reject')then continue
+        end else
+          if (WorkFlow<>'reject') then continue;
+        initold:=SetInitOld;
+        proceed := True;
+      end;
+    end else if ((not def.PostOnApprove) and (not def.PostOnReject)) or (Workflow='') then proceed := false;
+
+    if not proceed  then continue;
+
+    rcount := getrowcount(def.sourceframe);
+    for r:=1 to rcount do begin
+      s1 := '';
+      s2 := '';
+      Positive := not delete;
+      GetIdStrings(r, s1, s2);
+      if (s1 = '') and (s2='') then continue;
+      LinkChanged := s2 <> '';
+      AddToData(s1, r);
+      Positive := not delete;
+      if s2 <> '' then begin
+        Positive := false;
+        AddToData(s2, r);
+      end;
+    end;
+  end;
+end;
+
+
+end.
+{
+
+Sample Definition
+=================
+amdmap upddailytrans
+TableName = dailytrans
+SourceFrame = 2
+@mid=mid
+@t2vchdt=t2vchdt
++debit=ndbamount
++credit=ncramount
+
+@ find
++ Add
+- Less
+= Replace
+> Highest
+< Lowest
+^ Increment
+! Decrement
+}
+
+

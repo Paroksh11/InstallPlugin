@@ -1,0 +1,2875 @@
+unit UProfitEVAL;
+{Copied from 11.0}
+interface
+
+uses
+  Windows, Messages, SysUtils, Classes, Graphics, Controls, Forms, Dialogs,
+  ComCtrls, UParse, math, uStoreData, uValueStock, db, grids,
+  ShellAPI, ShellConsts, uBOM, uStructDef, uXDS, Comobj, Variants, idglobal,
+  DateUtils, uDoDebug, IdGlobalProtocols, uAxProvider,XMLDoc, XMLIntf,uPropsXml,StrUtils,
+  IdURI, IdCoderMIME , IdHTTP, IdAuthentication, IdSSLOpenSSL ;
+
+
+type
+  TOnGetValue = procedure(FieldName:String;Rowno:integer; var Value : String; var IdValue : Extended) of object;
+  TOnSetValue = procedure(FieldName:String;Rowno:integer; Value : String) of object;
+  TOnSetSequence = procedure(sTransid, FieldName, Prefix : String) of object;
+  TOnGetLedgerDetails = Procedure(Refno:String;RefDt:TDatetime;ChequeNo: String;ChqDt:TDatetime;BnkName,t1narr:String;trans1id: Extended;Mname: String;var ResultStr: String) of object;
+  TOnReplaceTempTable = function(s:String):String of object;
+  TOnGetRCell =  function (ColName: String; RowNo: integer): String of object;
+  TonHidecolumn = procedure(columnname : String) of object;
+  TonActivateTotal = procedure(ordno,active : String) of object;
+  TOnGetCell= function(ColName, RColName, Rvalue: String): String of object;
+  TOnGetSubTotal=function(DetFldName:String;ParentRowNo:integer):Extended of object;
+  TOnGetSubDelimiterStr=function(DetFldName,Delimiter,Quoted:String;ParentRowNo:integer):String of object;
+  TOnFill=procedure(xmlstring:String) of object;
+  TOnBulkPrinting=procedure(sqlstring:String) of object;
+  TOnGetSubValue = function(Fieldname: String; RowNo,ParentRowNo: integer):String of object;
+  TOnGetSubRow = function(Fieldname,FieldValue: String; ParentRowNo: integer):integer of object;
+  TOnSubSumTill = function(ClassificationFld, ClassificationValue, CumulationFld: String;Rowno,ParentRowNo: integer): Real of object;
+  TOnSubSum = function(ClassificationFld, ClassificationValue, CumulationFld: String;ParentRowNo: integer): Real of object;
+  TOnInitGrid = procedure(FrameNo:Integer) of object;
+  TOnDoFillGrid = procedure(FgName:String) of object;
+  TOnRefreshFrame = procedure(FrmNo:Integer) of object;
+  TOnCreatePkt=procedure(sTransid:String;recid:String) of object;
+  TOnLoadAndSave=function(pTransid, pRecordid:String):String of object;
+  TOnSaveTrans=function():String of object;
+  TOnValidateTrans=function():String of object;
+  TOnCopyTrans=procedure(pRecordId:Extended) of object;
+  TOnCopyTransAndSave = Procedure(SrcTransid:String; SrcRecid:Extended; FldDets:String)of object;
+  TOnDupTrans=procedure(sTransid:String;sRecId:Extended;tTransid:String;tRecid:Extended) of object;
+  TOnLoadTrans=function(Transid:String;Recordid:Extended):String of object;
+  TOnEndTrans=function:String of object;
+  TOnWithTransSetValue = procedure(FieldName:String;Rowno:integer; Value : String) of object;
+  TOnSetValidValue = function(FldName:String;RowNo:Integer):String of object;
+  TOnSetCaption = procedure(FldName: String; FldCaption: String) of object;
+  TOnRefreshField=function(FldName:String;RowNo:Integer):String of object;
+  TOnNewTrans=procedure of object;
+  TOnSetTabStop=procedure(FldList: String) of object;
+
+  TOnSetFont = Procedure(Fieldname,Condition,TrueStr,FalseStr:String) of Object;
+  TOnSetFieldStatus = Procedure(FldDet:String) of Object;
+  TOnSetBtnStatus = Procedure(BtnDet:String) of Object;
+  TOnSetDcStatus = Procedure(DcDet:String) of Object;
+  TOnSendMail=Function(XmlString : IXMLNode):String of object;
+  TFillOnLoad=Procedure(SQLText:String) of object;
+  TOnCallStoreDependency=Function(SXML:IXmlDocument;Transid:String):String of object;
+  TOnShowReport=Procedure of object;
+  TOnSendToSign = function (Transid,FormName,FieldName:String): string of object;
+  TOnDupRow = Procedure(nFrmNo,SrcRow,TgtRow:Integer) of Object;
+  TOnSelectNext = Procedure(FldName:String;RowNo:Integer) of Object;
+  TOnSelectFirst = Procedure(FldName:String;RowNo:Integer) of Object;
+  TOnSetFocus = Procedure(Ffld:String;FRow:integer) of Object;
+  TPostRowDataFromIview = procedure(pTransid,primaryfield,mapstring : String) of Object;
+  TReSendWorkFlowMail = Procedure(sTransid:String;sRecid:Extended;sAppLevel:Integer) of object;
+  TOnCreateIview = Function(ivName,ivCap,sqltext,paramtext:String):String of object;
+  TOnSaveIview = function(ivname,defaultPage: String): String of object;
+  TOnDeleteIview = function(ivName:string):String of object;
+  TByteRec = Record
+    Lo, Hi: Byte;
+  End;
+  TIdHTTPAccess = class(TIdHTTP)
+  end;
+
+  TProfitEVAL = class(TEVAL)
+  private
+  { Private declarations }
+    work : TXDS;
+    fStoreData,wStoreData : TStoreData;
+    BOM : TBom;
+//    Table1 : TTable;
+    FieldWidth,FieldDec : Integer;
+    lastRandomNo : String;
+    nownum : integer;
+    IdHTTPObj : TIdHttp;
+    LHandler: TIdSSLIOHandlerSocketOpenSSL;
+    function GetNthString(SrcString: String; StrPos: integer): String;
+    function GetSeperatorCount(const SrcStr: String;
+      Seperator: Char): integer;
+    Function RemoveCommas(S: String): String;
+    Function InsertCommas(Value,Millions: String): String;
+
+    procedure SQLRegVar(SQLText: String);
+    procedure SetStoreData(sd:TStoreData);
+    procedure SetWithTransStoreData(sd:TStoreData);
+    function SetSystemVar(varname, VarValue: String): String;
+    procedure XRun(Fname: String);
+    function OpenDialog: String;
+    function SaveDialog: String;
+    procedure InitBOM;
+    function CreateWordDoc(strFile: String): Boolean;
+    procedure AddToVarUsed(PFieldName: String);
+    function GetSubTotal(DetFldName: String;
+      ParentRowNo: Integer): Extended;
+    function GetSubDelimitedStr(DetFldName, Delimiter,Quoted: String;
+      ParentRowNo: Integer): String;
+    function WithTransaction(Transid: String; Recordid: Extended): String;
+    procedure DoWriteToFile(Formatfile, TargetFile, Instructions: String);
+    function findChangeXmlNodeandcat(changeprop: String): String;
+    procedure UpdateAxpFldsTable(tid, fname, modifiedVal: string);
+    function CreateIview(ivName, ivCap, sqltext, paramtext: String): String;
+    function SaveIview(ivname,defaultPage: String): String;
+    function DeleteIview(ivName:string):String;
+     procedure CreateHttpComps(Hstr,AuthStr: String);
+    function GetBodyReqStr(sBReqStr: String): String;
+    procedure StoreAPIDetails(ReqId, UrlStr, ServiceName, ServiceMethod,
+      ParamStr, HeaderStr, ReqStr,ScrptName,BodyParamStr, AuthStr: String);
+    procedure UpdateResponse(Reqid, RespStr, status: String);
+    function DesignFastReport(pFormName, pSourceTemplateName,
+      pTargetTemplateName: String):String;
+    procedure SetAuthDetails(AuthStr: String);
+
+  protected
+  { Protected declarations }
+    procedure CallFunction(FncName: String; P: TParamArray; ParamCount: integer; var S: String); override;
+  public
+    valuestock : TValueStock;
+    StringGrid: TStringGrid;
+    GrandTotals : TStringList;
+    TotalsList : TList;
+    WorkOnStoreData: Boolean;
+    OnGetValue : TOnGetValue;
+    OnGetSubValue : TOnGetSubValue;
+    OnSetValue : TOnSetValue;
+    OnGetLedgerDetails: TonGetLedgerDetails;
+    OnSetSequnce : TOnSetSequence;
+    OnReplaceTempTable : TOnReplaceTempTable;
+
+    OpenDialog1 : TOpenDialog;
+    SaveDialog1 : TSaveDialog;
+    OnGetRCell : TOnGetRCell;
+    OnHidecolumn       : TonHidecolumn;
+    onActivateTotal : TonActivateTotal ;
+    OnGetCell : TOnGetCell;
+    OnGetSubTotal : TOnGetSubTotal;
+    OnGetSubDelimitedStr : TOnGetSubDelimiterStr;
+    OnFill : TOnFill;
+    OnBulkPrinting : TOnBulkPrinting;
+    OnGetSubRow : TOnGetSubRow;
+    OnSubSumTill : TOnSubSumTill;
+    OnSubSum : TOnSubSum;
+    OnInitGrid : TOnInitGrid;
+    OnDoFillGrid : TOnDoFillGrid;
+    OnRefreshFrame : TOnRefreshFrame;
+    OnCreatePkt : TOnCreatePkt;
+    OnLoadAndSave : TOnLoadAndSave;
+    OnSaveTrans : TOnSaveTrans;
+    OnValidateTrans : TOnValidateTrans;
+    OnCopyTrans : TOnCopyTrans;
+    OnCopyTransAndSave : TOnCopyTransAndSave;
+    OnDupTrans : TOnDupTrans;
+    FromDev : Boolean;
+    OnLoadTrans : TOnLoadTrans;
+    OnEndTrans : TOnEndTrans;
+    OnWithTransSetValue : TOnWithTransSetValue;
+    OnSetValidValue : TOnSetValidValue;
+    OnSetCaption : TOnSetCaption;
+    OnRefreshField : TOnRefreshField;
+    OnNewTrans : TOnNewTrans;
+    BulkFileOutput:String;
+    OnSetTabStop : TOnSetTabStop;
+    OnSetFont : TOnSetFont;
+    OnSetFieldStatus : TOnSetFieldStatus;
+    OnSetFocus : TOnSetFocus;
+    OnSetBtnStatus : TOnSetBtnStatus;
+    OnSetDcStatus : TOnSetDcStatus;
+    OnSendMail : TOnSendMail;
+    OnFillOnLoad : TFillOnLoad;
+    OnCallStoreDependency : TOnCallStoreDependency;
+    OnShowReport : TOnShowReport;
+    OnSendToSign : TOnSendToSign;
+    OnDupRow : TOnDupRow;
+    OnSelectNext : TOnSelectNext;
+    OnSelectFirst : TOnSelectFirst;
+    PostRowDataFromIview : TPostRowDataFromIview;
+    ReSendWorkFlowMail : TReSendWorkFlowMail;
+    OnCreateIview : TOnCreateIview;
+    OnSaveIview : TOnSaveIview;
+    OnDeleteIview : TOnDeleteIview;
+    axds,cxds : Txds;
+    property StoreData: TStoreData read fStoreData write SetStoreData;
+    property WithTransStoreData: TStoreData read wStoreData write SetWithTransStoreData;
+
+    constructor Create (AxPro : TAxProvider);
+    destructor Destroy; override;
+    function Total(PFieldName: String): Real;
+    function Sum(ClassificationFld, ClassificationValue, CumulationFld: String): Real;overload;
+    function Sum(ClassificationFld, ClassificationValue, CumulationFld: String;ParentRowNo:Integer): Real;overload;
+    function SumTill(ClassificationFld, ClassificationValue, CumulationFld: String;Rowno : integer): Real;overload;
+    function SumTill(ClassificationFld, ClassificationValue, CumulationFld: String;Rowno,ParentRowNo: integer): Real;overload;
+    function GetMax(pFieldName: String): integer;
+    function GetMin(pFieldName: String): integer;
+    function GetValue(pFieldname: String; RowNo: integer): String;overload;
+    function GetValue(pFieldname: String; RowNo,ParentRowNo: integer): String;overload;
+    function GetId(pFieldName: String; RowNo: integer): extended;
+    function GetRow(pFieldName, Fieldvalue: String): integer;overload;
+    function GetRow(pFieldName, Fieldvalue: String;ParentRowNo:Integer): integer;overload;
+    function GetRowCount(pFieldName: String): integer;
+    function GetOld(pFieldName: String; RowNo: Integer): String;
+    function GetOldId(pFieldName: String; RowNo: Integer): Extended;
+
+    function TotalFromSD(PFieldName: String): Real;
+    function SumFromSD(ClassificationFld, ClassificationValue, CumulationFld: String): Real;
+    function GetMaxFromSD(pFieldName: String): integer;
+    function GetminFromSD(pFieldName: String): integer;
+    function GetValueFromSD(pFieldname: String; RowNo: integer): String;
+    function GetIdFromSD(pFieldname: String; RowNo: integer): extended;
+    function GetRowFromSD(pFieldName, Fieldvalue: String): integer;
+    function GetRowCountFromSD(pFieldName: String): integer;
+    Function Getinteger(Value : Real) :real;
+    Function GetLength(value : String) :integer;
+    Function FieldChanged(FieldName:String;RowNo:integer):String;
+    Function GetMod(Value :Integer; Divisor : Integer):integer;
+    function SetValue(FieldName: String; Rowno: integer;Value: String): String;
+    function SetSequence(FieldName, Prefix:String): String;
+    function SetExtSequence(sTransid, FieldName, Prefix:String): String;
+    Function FormatAmount(Value : Real; DecLen :Integer;withComma,MillionRep,NegativeRep,PositiveRep : String) :String;
+    Function FormatAccAmount(Value : Real ; DecLen :Integer;withComma,MillionRep,MALIE,Rep :String):String;
+    function FormatValue(value: String; Declen: integer;ApplyCommas,MillionRep: String): String;
+    Function LeftPad(S: String; MaxLength: integer; c: Char): String;
+    Function Pad(S: String; MaxLength: integer; c: Char): String;
+    function SumTillFromSD(ClassificationFld, ClassificationValue, CumulationFld: String; RowNo: integer): Real;
+    function GetClosingStock(ItemId: extended; DocDate: TDateTime; VMethod, plocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+    function GetCostRate(ItemId: extended; DocDate: TDateTime; IssueQty: Extended; VMethod, plocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+    function GetStockValue(ItemId: extended; DocDate: TDateTime; IssueQty: Extended; VMethod, plocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+    function GetRoundOff(ColumnName, RowId: String; SumTill, RoundTo: Integer): Extended;
+    procedure DoFileWrite(Formatfile, TargetFile, Instructions: String);
+    procedure BulkFileWrite(Formatfile, TargetFile, Sql: String);
+//    function CreateDbf(SQLText, DirName, TName: String): String;
+//    function CreateFromDBf(DirName, TName: String): String;
+    function GetAllValues(FName,Quoted: String;UniqueVal:String='f'): String;
+    function GetDependency(PFieldName: String): String;
+    function RandomNo: String;
+    procedure SaveImage(transid,fieldname:String;recordid:Extended;filename:String);
+    function EndWith:String;
+    procedure SQLReSave(SQLText: String);
+    procedure FetchData(FldName:String);
+    function GetSourceImage(Transid,ImgFldName:String; Recid:Extended): String;
+    Procedure DoMassUpdate;
+    function SendToSign(TransId, FormName: String): String;
+  	function ExecuteAPI(ReqId, UrlStr, ServiceName, ServiceMethod, ParamStr,
+      HeaderStr, ReqStr: String;ScrptName:String='';BodyParamStr:String='';AuthStr:String=''): String;
+
+  published
+
+  { Published declarations }
+  end;
+
+var
+  SubFormGrid : TWinControl;
+
+implementation
+
+uses uAxFastRun;
+
+constructor TProfitEVAL.Create(AxPro : TAxProvider);
+var i:integer;
+begin
+  inherited Create(AxPro);
+  fStoreData := nil;
+  wStoreData := nil;
+  RegisterVar('Op_StockQty', 'n', '');
+  RegisterVar('Op_StockValue', 'n', '');
+  RegisterVar('Rec_stockqty', 'n', '');
+  RegisterVar('Rec_StockValue', 'n', '');
+  RegisterVar('Iss_StockQty', 'n', '');
+  RegisterVar('Iss_StockValue', 'n', '');
+  RegisterVar('ActiveRow', 'n', '');
+  RegisterVar('ActiveCol', 'n', '');
+  RegisterVar('ActivePRow', 'n', '');
+  RegisterVar('WF_Applevel', 'n', '');
+  RegisterVar('WF_Status', 'c', '');
+  RegisterVar('WF_Maxlevel', 'n', '');
+  RegisterVar('Axp_Attachedfiles','c','');
+  RegisterVar('Axp_LoadedImages','c','');
+  RegisterVar('PriorRow', 'n', '');
+  RegisterVar('NextRow', 'n', '');
+
+  RegisterFnc('Total', 'n');
+  RegisterFnc('Sum', 'n');
+  RegisterFnc('SumTill','n');
+  RegisterFnc('GetMax', 'n');
+  RegisterFnc('GetMin', 'n');
+  RegisterFnc('GetValue', 'c');
+  RegisterFnc('GetId', 'n');
+  RegisterFnc('GetRow', 'n');
+  RegisterFnc('GetRowCount', 'n');
+  RegisterFnc('GetStockValue', 'n');
+  RegisterFnc('GetCostRate', 'n');
+  RegisterFnc('GetClosingStock', 'n');
+  RegisterFnc('CheckStock','c');
+  RegisterFnc('Getinteger','n');
+  RegisterFnc('GetLength','n');
+  RegisterFnc('GetMod','n');
+  RegisterFnc('FieldChanged', 's');
+  RegisterFnc('setvalue', 's');
+  RegisterFnc('addrow', 's');
+  RegisterFnc('deleterow', 's');
+  RegisterFnc('setsequence', 's');
+  RegisterFnc('setextsequence', 's');
+  RegisterFnc('formatamount','s');
+  RegisterFnc('formataccamount','s');
+  RegisterFnc('leftpad', 's');
+  RegisterFnc('pad', 's');
+  RegisterFnc('CreateDbf','s');
+  RegisterFnc('CreateFromDBf','s');
+  RegisterFnc('getold', 's');
+  RegisterFnc('getoldid', 'n');
+  RegisterFnc('sqlregvar', 's');
+  RegisterFnc('getroundoff', 'n');
+  RegisterFnc('setsystemvar', 's');
+  RegisterFnc('xrun', 's');
+  RegisterFnc('opendialog', 's');
+  RegisterFnc('savedialog', 's');
+  RegisterFnc('placeform', 's');
+  Registerfnc('hideframe', 's');
+  RegisterFnc('activatetotal','s');
+  RegisterFnc('hidecolumn','s');
+  RegisterFnc('explodebom', 's');
+  RegisterFnc('preparebom', 's');
+  RegisterFnc('poststring', 's');
+  RegisterFnc('filewrite', 's');
+  RegisterFnc('bulkfilewrite', 's');
+  RegisterFnc('writetofile', 's');  
+  RegisterFnc('createworddoc', 's');
+  RegisterFnc('copyfile','s');
+  RegisterFnc('getallvalues','s');
+  RegisterFnc('getdependency','s');
+  RegisterFnc('GetRCell', 's');
+  RegisterFnc('getledgerdetails','s');
+  RegisterFnc('GetCell', 'c');
+  RegisterFnc('getsubtotal', 'n');
+  RegisterFnc('getsubdelimitedstr', 's');
+  RegisterFnc('fill', 's');
+  RegisterFnc('bulkprinting', 's');
+  RegisterFnc('initgrid', 's');
+  RegisterFnc('refreshframe', 's');
+  RegisterFnc('dofillgrid', 's');
+  RegisterFnc('createpkt', 's');
+  RegisterFnc('loadandsave', 's');
+  RegisterFnc('savetrans', 's');
+  RegisterFnc('validatetrans', 's');
+  RegisterFnc('randomno','s');
+  RegisterFnc('saveimage','s');
+  RegisterFnc('copytrans', 's');
+  RegisterFnc('duptrans', 's');
+  RegisterFnc('sqlresave', 's');
+  RegisterFnc('WithTransaction','s');
+  RegisterFnc('EndWith','s');
+  RegisterFnc('SetValidValue','s');
+  RegisterFnc('FetchData', 's');
+  RegisterFnc('SetCaption', 's');
+  RegisterFnc('NewTrans','s');
+  RegisterFnc('refreshfield', 's');
+  RegisterFnc('SetTabStop', 's');
+  RegisterFnc('SendMail', 's');
+  RegisterFnc('GetSourceImage', 's');
+  RegisterFnc('SetFont','s');
+  RegisterFnc('SetFieldStatus','s');
+  RegisterFnc('SetBtnStatus','s');
+  RegisterFnc('SetDcStatus','s');
+  RegisterFnc('FillOnLoad', 's');
+  RegiSterFnc('DoMassUpdate','s');
+  RegiSterFnc('SendToSign','s');
+  RegisterFnc('DupRow', 's');
+  RegisterFnc('SelectFirst', 's');
+  RegisterFnc('SelectNext', 's');
+  RegisterFnc('setfocus', 's');
+  RegisterFnc('PostRowDataFromIview', 's');
+  RegisterFnc('ReSendWorkFlowMail','s');
+
+  RegisterFnc('CreateIview','s');
+  RegisterFnc('SaveIview','s');
+  RegisterFnc('DeleteIview','s');
+  RegisterFnc('ExecuteAPI','s');
+  RegisterFnc('DesignFastReport','s');
+
+  WorkOnStoreData := true;
+  valuestock := TValuestock.create;
+  axds := Axp.dbm.GetXds(nil);
+  cxds := Axp.dbm.GetXds(nil);
+  FromDev := False;
+  Work := nil;
+end;
+
+destructor TProfitEVAL.Destroy;
+begin
+  valuestock.Free;
+  if assigned(axds) then
+  begin
+    axds.close;
+    axds.Destroy;
+    axds := nil;
+  end;
+  if assigned(cxds) then
+  begin
+    cxds.close;
+    cxds.Destroy;
+    cxds := nil;
+  end;
+  inherited Destroy;
+end;
+
+procedure TProfitEval.SetStoreData(sd:TStoreData);
+begin
+  fStoreData := sd;
+end;
+
+procedure TProfitEval.SetWithTransStoreData(sd:TStoreData);
+begin
+  wStoreData := sd;
+end;
+
+function TProfitEVAL.Total(PFieldName: String): Real;
+var
+  Par: TComponent;
+  I, J: Integer;
+  K, Val: Real;
+  Temp: String;
+begin
+{If Result type is Real then the user has to convert it to String if necessary.
+ Or use the Temp variable and change the code.}
+  Result := 0;
+  pFieldName := trim(pFieldName);
+
+  if FromDev then AddToVarUsed(pFieldName);
+  if WorkOnStoreData then begin
+    Result := TotalFromSD(pFieldName);
+    exit;
+  end;
+end;
+
+function TProfitEVAL.TotalFromSD(PFieldName: String): Real;
+var
+  k, r: integer;
+begin
+  Result := 0;
+  if not assigned(storedata) then exit;
+  PFieldName := lowercase(PFieldName);
+  for r := 0 to storedata.FieldList.Count - 1 do begin
+    if (lowercase(pFieldRec(StoreData.FieldList[r]).FieldName) = PFieldName) and
+       (pFieldRec(StoreData.FieldList[r]).RowNo > 0) and
+       (pFieldRec(StoreData.FieldList[r]).Value <> '') then
+        Result := Result + StrToFloat(pFieldRec(StoreData.FieldList[r]).Value);
+  end;
+end;
+
+function TProfitEVAL.Sum(ClassificationFld, ClassificationValue, CumulationFld: String): Real;
+var
+  Total: real;
+  Row, CumFieldIndex, Fieldindex: integer;
+  Value, SFldValue: String;
+begin
+  Total := 0;
+  result := 0;
+  Classificationfld := trim(classificationfld);
+  if FromDev then AddToVarUsed(Classificationfld);
+  Cumulationfld := trim(cumulationfld);
+  if FromDev then AddToVarUsed(Cumulationfld);
+
+  if WorkOnStoreData then begin
+    Result := SumFromSD(ClassificationFld, ClassificationValue, CumulationFld);
+    exit;
+  end;
+end;
+
+function TProfitEVAL.SumTill(ClassificationFld, ClassificationValue, CumulationFld: String;Rowno : integer): Real;
+var
+  Total: real;
+  Row, CumFieldIndex, Fieldindex: integer;
+  Value, SFldValue: String;
+begin
+  result := 0;
+  if FromDev then AddToVarUsed(Classificationfld);
+  if FromDev then AddToVarUsed(Cumulationfld);
+  if WorkOnStoreData then begin
+    Result := SumTillFromSD(ClassificationFld, ClassificationValue, CumulationFld, Rowno);
+    exit;
+  end;
+end;
+
+function TProfitEVAL.SumTillFromSD(ClassificationFld, ClassificationValue, CumulationFld: String; RowNo:integer): Real;
+var  kt, r: integer;
+begin
+  result := 0;
+  if not assigned(storedata) then exit;
+  ClassificationFld := lowercase(ClassificationFld);
+  for r := 0 to storedata.FieldList.Count - 1 do begin
+    if (lowercase(pFieldRec(StoreData.FieldList[r]).FieldName) = ClassificationFld) and
+       (pFieldRec(StoreData.FieldList[r]).RowNo > 0) and (pFieldRec(StoreData.FieldList[r]).RowNo <= RowNo) and
+       (pFieldRec(StoreData.FieldList[r]).Value = ClassificationValue) then begin
+      kt := StoreData.GetFieldIndex(Cumulationfld, pFieldRec(StoreData.FieldList[r]).RowNo);
+      if (kt > -1) and (pFieldRec(StoreData.FieldList[kt]).Value <> '') then
+        Result := Result + StrToFloat(pFieldRec(StoreData.FieldList[kt]).Value);
+    end;
+  end;
+end;
+
+function TProfitEVAL.SumTill(ClassificationFld, ClassificationValue, CumulationFld: String;Rowno,ParentRowno : integer): Real;
+var
+  Total: real;
+  Row, CumFieldIndex, Fieldindex: integer;
+  Value, SFldValue: String;
+begin
+  Total := 0;
+  result := 0;
+  if FromDev then AddToVarUsed(Classificationfld);
+  if FromDev then AddToVarUsed(Cumulationfld);
+  if (RowNo = -1) or (ParentRowNo = -1) then exit;
+  if assigned(OnSubSumTill) then begin
+    result := OnSubSumTill(ClassificationFld, ClassificationValue, CumulationFld,Rowno,ParentRowno);
+  end;
+end;
+
+function TProfitEVAL.Sum(ClassificationFld, ClassificationValue, CumulationFld: String;ParentRowno : integer): Real;
+var
+  Total: real;
+  Row, CumFieldIndex, Fieldindex: integer;
+  Value, SFldValue: String;
+begin
+  Total := 0;
+  result := 0;
+  Classificationfld := trim(classificationfld);
+  if FromDev then AddToVarUsed(Classificationfld);
+  Cumulationfld := trim(cumulationfld);
+  if FromDev then AddToVarUsed(Cumulationfld);
+  if(ParentRowNo = -1) then exit;
+  if assigned(OnSubSum) then begin
+    result := OnSubSum(ClassificationFld, ClassificationValue, CumulationFld,ParentRowno);
+  end;
+end;
+
+function TProfitEVAL.SumFromSD(ClassificationFld, ClassificationValue, CumulationFld: String): Real;
+var kt, r: integer;
+begin
+  result := 0;
+  if not assigned(storedata) then exit;
+  ClassificationFld := lowercase(ClassificationFld);
+  for r := 0 to storedata.FieldList.Count - 1 do begin
+    if (lowercase(pFieldRec(StoreData.FieldList[r]).FieldName) = ClassificationFld) and
+       (pFieldRec(StoreData.FieldList[r]).RowNo > 0) and
+       (pFieldRec(StoreData.FieldList[r]).Value = ClassificationValue) then begin
+      kt := StoreData.GetFieldIndex(Cumulationfld, pFieldRec(StoreData.FieldList[r]).RowNo);
+      if (kt > -1) and (pFieldRec(StoreData.FieldList[kt]).Value <> '') then
+        Result := Result + StrToFloat(pFieldRec(StoreData.FieldList[kt]).Value);
+    end;
+  end;
+end;
+
+function TProfitEval.GetMax(pFieldName: String): integer;
+var
+  i, ColNo, MaxRow: integer;
+  MaxValue, V: Real;
+  SMax: String;
+begin
+  Result := -1;
+  if FromDev then AddToVarUsed(pFieldName);
+  if WorkOnStoreData then begin
+    Result := GetMaxFromSD(pFieldName);
+    exit;
+  end;
+end;
+
+function TProfitEval.GetMaxFromSD(pFieldName: String): integer;
+var
+  i: integer;
+  MaxValue, V: Real;
+  SMax: String;
+begin
+  Result := -1;
+  if not assigned(storedata) then exit;
+  PFieldName := lowercase(PFieldName);
+  MaxValue := 0;
+  SMax := '';
+  for i := 0 to storedata.FieldList.Count - 1 do begin
+    if (lowercase(pFieldRec(StoreData.FieldList[i]).FieldName) = PFieldName) and
+       (pFieldRec(StoreData.FieldList[i]).RowNo > 0) and
+       (pFieldRec(StoreData.FieldList[i]).Value <> '') then begin
+      if lowercase(pFieldRec(StoreData.FieldList[i]).DataType) = 'n' then begin
+        try
+          v := StrToFloat(pFieldRec(StoreData.FieldList[i]).Value);
+        except on e:Exception do
+          begin
+            if assigned(axp) then  axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\GetMaxFromSD - '+e.Message);
+            v := 0;
+          end;
+        end;
+        if v > MaxValue then begin
+          MaxValue := V;
+          Result := pFieldRec(StoreData.FieldList[i]).RowNo;
+        end;
+      end else begin
+        if pFieldRec(StoreData.FieldList[i]).Value > SMax then begin
+          SMax := pFieldRec(StoreData.FieldList[i]).Value;
+          Result := pFieldRec(StoreData.FieldList[i]).RowNo;
+        end;
+      end;
+    end;
+  end;
+end;
+
+function TProfitEval.GetValue(pFieldname: String; RowNo: integer): String;
+var s:String;
+    id : extended;
+begin
+  Result := '';
+  if FromDev then AddToVarUsed(pFieldName);
+  if RowNo = -1 then exit;
+    if WorkOnStoreData then begin
+    Result := GetValueFromSD(pFieldName, RowNo);
+    Exit;
+  end;
+  if assigned(ongetvalue) then begin
+    s := '';
+    id := 0;
+    OnGetValue(pFieldName, RowNo, s, Id);
+    Result := s;
+  end;
+end;
+
+function TProfitEval.GetValueFromSD(pFieldname: String; RowNo: integer): String;
+var
+  kf: integer;
+  fld : pfld;
+  tempsd : TStoreData;
+begin
+  Result := '';
+  if not assigned(storedata) then exit;
+  if (assigned(WithTransStoreData)) and (lowercase(Copy(pFieldName,1,7)) <> 'parent.') then
+    tempsd := WithTransStoreData
+  else
+    tempsd := Storedata;
+  kf := tempsd.GetFieldIndex(pFieldname, RowNo);
+  if kf = -1 then exit;
+  if (lowercase(pFieldRec(tempsd.FieldList[kf]).DataType) = 'n') and (pFieldRec(tempsd.FieldList[kf]).Value = '') then
+    Result := '0'
+  else
+    Result := pFieldRec(tempsd.FieldList[kf]).Value;
+  fld := tempsd.structdef.GetField(pFieldname);
+  if fld <> nil then begin
+    FieldWidth := fld.Width;
+    FieldDec := fld.Dec;
+  end;
+end;
+
+function TProfitEval.GetValue(pFieldname: String; RowNo,ParentRowNo: integer): String;
+var s:String;
+    id : extended;
+begin
+  Result := '';
+  if FromDev then AddToVarUsed(pFieldName);
+  if (RowNo = -1) or (ParentRowNo = -1) then exit;
+   if assigned(OnGetSubValue) then begin
+    s := OnGetSubValue(pFieldName, RowNo, ParentRowNo);
+    Result := s;
+  end;
+end;
+
+function TProfitEval.GetId(pFieldName: String; RowNo: integer): Extended;
+var
+  ColNo: integer;
+  value : String;
+  IdValue : Extended;
+begin
+  Result := 0;
+  if FromDev then AddToVarUsed(pFieldName);
+  if RowNo = -1 then exit;
+  if WorkOnStoreData then begin
+    Result := GetIdFromSD(pFieldName, RowNo);
+    Exit;
+  end;
+end;
+
+function TProfitEval.GetIdFromSD(pFieldname: String; RowNo: integer): Extended;
+var
+  kf: integer;
+begin
+  Result := 0;
+  if not assigned(storedata) then exit;
+  kf := StoreData.GetFieldIndex(pFieldname, RowNo);
+  if kf = -1 then exit;
+  if pFieldRec(StoreData.FieldList[kf]).value = 'sourcerecordid' then
+    Result := StoreData.publicsourceid
+  else
+    Result := pFieldRec(StoreData.FieldList[kf]).IdValue;
+end;
+
+function TProfitEval.GetRow(pFieldName, Fieldvalue: String): integer;
+var
+  i, ColNo, MaxRow: integer;
+begin
+  Result := -1;
+  if FromDev then AddToVarUsed(pFieldName);
+  if WorkOnStoreData then begin
+    Result := GetRowFromSD(pFieldName, FieldValue);
+    Exit;
+  end;
+end;
+
+function TProfitEval.GetRow(pFieldName, Fieldvalue: String;ParentRowNo:Integer): integer;
+var
+  i, ColNo, MaxRow: integer;
+begin
+  Result := -1;
+  if FromDev then AddToVarUsed(pFieldName);
+  if assigned(OnGetSubRow) then begin
+    result := OnGetSubRow(pFieldName,FieldValue,ParentRowNo);
+    Exit;
+  end;
+end;
+
+function TProfitEval.GetRowFromSD(pFieldName, Fieldvalue: String): integer;
+var
+  kf, i: integer;
+begin
+  Result := -1;
+  if not assigned(storedata) then exit;
+  PFieldName := lowercase(PFieldName);
+  for i := 0 to storedata.FieldList.Count - 1 do begin
+    if (lowercase(pFieldRec(StoreData.FieldList[i]).FieldName) = PFieldName) and
+       (pFieldRec(StoreData.FieldList[i]).RowNo > 0) and
+       (pFieldRec(StoreData.FieldList[i]).Value = Fieldvalue) then begin
+        Result := pFieldRec(StoreData.FieldList[i]).RowNo;
+        break;
+    end;
+  end;
+end;
+
+function TProfitEval.GetRowCount(pFieldName: String): integer;
+begin
+  Result := 0;
+  if FromDev then AddToVarUsed(pFieldName);
+  if WorkOnStoreData then begin
+    Result := GetRowCountFromSD(pFieldName);
+    exit;
+  end;
+end;
+
+function TProfitEval.GetRowCountFromSD(pFieldName: String): integer;
+var
+  i, kf: integer;
+begin
+  Result := 0;
+  if not assigned(storedata) then exit;
+  PFieldName := lowercase(PFieldName);
+  for i := 0 to storedata.FieldList.Count - 1 do begin
+    if (lowercase(pFieldRec(StoreData.FieldList[i]).FieldName) = PFieldName) and
+       (pFieldRec(StoreData.FieldList[i]).RowNo > 0) then
+        Inc(result);
+  end;
+end;
+
+function TProfitEval.GetOld(pFieldName: String; RowNo: Integer): String;
+begin
+  Result := '';
+  if FromDev then AddToVarUsed(pFieldName);
+  if not assigned(StoreData) then exit;
+  Result := StoreData.GetOldValue(pFieldName, RowNo);
+end;
+
+function TProfitEval.GetOldId(pFieldName: String; RowNo: Integer): Extended;
+var k:integer;
+begin
+  Result := 0;
+  if FromDev then AddToVarUsed(pFieldName);
+  if not assigned(StoreData) then exit;
+  k := Storedata.GetFieldIndex(pFieldName, RowNo);
+  if k = -1 then exit;
+  Result := pFieldRec(StoreData.FieldList[k]).OldIdValue;
+end;
+
+procedure TProfitEVAL.CallFunction(FncName: String; P: TParamArray; ParamCount: integer; var S: String);
+var
+  amount: currency;
+  v : extended;
+  ResultStr :String;
+  i : integer;
+//  foundval : boolean;
+begin
+  S := '';
+  for i:=1 to 20 do
+  begin
+   if p[i] = '~e~' then p[i] := '';
+  end;
+  try
+  FncName := LowerCase(FncName);
+  inherited CallFunction(FncName, P, ParamCount, S);
+  if FncName = 'total' then s := FloatToStr(Total(P[1]))
+  else if FncName = 'sum' then begin
+    if P[4] = '' then
+      S := FloatToStr(Sum(P[1], P[2], P[3]))
+    else
+      S := FloatToStr(Sum(P[1], P[2], P[3],strtoint(p[4])));
+  end else if FncName = 'sumtill' then begin
+    if P[5] = '' then
+      S := Floattostr(SumTill(p[1],p[2],p[3],strtoint(p[4])))
+    else
+      S := Floattostr(SumTill(p[1],p[2],p[3],strtoint(p[4]),strtoint(p[5])))
+  end else if FncName = 'getmax' then S := IntToStr(GetMax(P[1]))
+  else if FncName = 'getmin' then S := IntToStr(GetMin(P[1]))
+  else if FncName = 'getvalue' then begin
+    if P[3] = '' then
+      S := GetValue(P[1], StrToInt(P[2]))
+    else
+      S := GetValue(P[1], StrToInt(P[2]),StrToInt(P[3]))
+  end
+  else if FncName = 'getid' then S := FloatToStr(GetId(P[1], StrToInt(P[2])))
+  else if FncName = 'getrow' then begin
+    if P[3] = '' then
+      S := IntToStr(GetRow(P[1], P[2]))
+    else
+      S := IntToStr(GetRow(P[1], P[2],StrToInt(P[3])));
+  end
+  else if FncName = 'getrowcount' then S := IntToStr(GetRowCount(P[1]))
+  else if FncName = 'getcostrate' then
+  begin
+    if P[6] = '' then
+      S := FloatToStr(GetCostRate(StrToFloat(P[1]), StrToDateTime(P[2]), StrToFloat(P[3]), P[4], p[5]))
+    else
+      S := FloatToStr(GetCostRate(StrToFloat(P[1]), StrToDateTime(P[2]), StrToFloat(P[3]), P[4], p[5], StrToFloat(P[6]), StrToFloat(P[7]), StrToFloat(P[8])))
+  end
+  else if FncName = 'getstockvalue' then
+  begin
+   if P[6] = '' then
+     S := FloatToStr(GetStockValue(StrToFloat(P[1]), StrToDateTime(P[2]), StrToFloat(P[3]), P[4], p[5]))
+   else
+     S := FloatToStr(GetStockValue(StrToFloat(P[1]), StrToDateTime(P[2]), StrToFloat(P[3]), P[4], p[5], StrToFloat(P[6]), StrToFloat(P[7]), StrToFloat(P[8])))
+  end
+  else if FncName = 'getclosingstock' then
+  begin
+   if P[5] = '' then
+     S := FloatToStr(GetClosingStock(StrToFloat(P[1]), StrToDateTime(P[2]), P[3], p[4]))
+   else
+     S := FloatToStr(GetClosingStock(StrToFloat(P[1]), StrToDateTime(P[2]), P[3], p[4], StrToFloat(P[5]), StrToFloat(P[6]), StrToFloat(P[7])))
+  end
+  else if FncName = 'checkstock' then begin
+    valuestock.dbm:=axp.dbm;
+    if getvarvalue('onsave') <> 'l' then
+      S := ValueStock.CheckStock(P[1], P[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10])
+    else
+      s := 'T';
+  end else if FncName = 'getinteger'  then S := floattostr(Getinteger(strtofloat(p[1])))
+  else if Fncname = 'getlength' then S := inttostr(GetLength(p[1]))
+  else if FncName = 'fieldchanged' then S := FieldChanged(p[1], strtoint(p[2]))
+  else if FncName = 'getallvalues' then begin
+    if p[3] = '' then
+      S := GetAllValues(p[1],p[2])
+    else
+      S := GetAllValues(p[1],p[2],p[3]);
+  end
+  else if FncName = 'getdependency' then S := GetDependency(p[1])
+  else If FncName = 'getmod' then S:= inttostr(GetMod(strtoint(p[1]),strtoint(p[2])))
+  else if FncName='getledgerdetails' then begin
+     resultstr:='';
+     if Assigned(ongetledgerdetails) then begin
+        if p[2]='' then p[2]:='30/12/1899';
+        if p[4]='' then p[4]:='30/12/1899';
+        if p[7]='' then p[7]:='0';
+        ongetledgerdetails(p[1],StrToDate(p[2]),p[3],StrToDate(p[4]),p[5],p[6],strToFloat(p[7]),p[8],resultstr);
+     end;
+     s:=resultstr;
+  end
+  else if fncname = 'setvalue' then s := setValue(p[1], strtoint(p[2]), p[3])
+  else if fncname = 'setsequence' then s := setsequence(p[1], p[2])
+  else if fncname = 'setextsequence' then s := setextsequence(p[1], p[2], p[3])
+  else if FncName = 'formatamount' then   S := FormatAmount(StrtoFloat(p[1]),Strtoint(p[2]),p[3],p[4],p[5],p[6])
+  else if FncName = 'formataccamount' then S := FormatAccAmount(StrtoFloat(p[1]),Strtoint(p[2]),p[3],p[4],p[5],p[6])
+  else if FncName = 'pad' then s := pad(p[1], strtoint(p[2]), p[3][1])
+  else if FncName = 'leftpad' then s := leftpad(p[1], strtoint(p[2]), p[3][1])
+//  else if FncName = 'createdbf' then s := createdbf(p[1],p[2],p[3])
+//  else if FncName = 'createfromdbf' then s := createfromdbf(p[1],p[2])
+  else if fncname = 'getold' then s := getold(p[1], strtoint(p[2]))
+  else if fncname = 'getoldid' then s := floattostr(getoldid(p[1], strtoint(p[2])))
+  else if FncName = 'getrcell' then S := OnGetRCell(p[1], strtoint(p[2]))
+  else if FncName = 'getcell' then begin
+    if assigned(ongetcell) then s := OnGetCell(P[1], p[2], p[3])
+  end else if fncname = 'getroundoff' then begin
+    FieldWidth := 0; FieldDec := 0;
+    v := getroundoff(p[1], p[2], strtoint(p[3]), strtoint(p[4]));
+    if (FieldWidth>0) then
+      s := floattostrf(v,fffixed,FieldWidth,FieldDec)
+    else
+      s := floattostr(v);
+  end else if fncname = 'setsystemvar' then s := setsystemvar(p[1], p[2])
+  else if FncName = 'hidecolumn' then begin
+     if assigned(onhidecolumn) then
+        onhidecolumn(p[1]);
+  end
+  else if FncName = 'activatetotal' then begin
+     if assigned(onhidecolumn) then
+        onActivateTotal(p[1],p[2]);
+  end
+  else if fncname = 'xrun' then XRun(p[1])
+  else if fncname = 'opendialog' then s := OpenDialog
+  else if fncname = 'savedialog' then s := SaveDialog
+  else if (fncname = 'sqlregvar') then sqlregvar(p[1])
+  else if (fncname='explodebom') then begin
+    initbom;
+    bom.explodebom;
+    bom.free;
+  end else if (fncname='preparebom') then begin
+    initbom;
+    bom.preparebom(p[1], p[2], StrToDateTime(p[3]));
+    bom.free;
+  end else if (fncname='filewrite') then begin
+    dofilewrite(p[1], p[2], p[3]);
+  end else if (fncname='bulkfilewrite') then begin                // changed due to bulk file write
+    BulkFileWrite(p[1], p[2], p[3]);
+  end else if (fncname='writetofile') then begin
+    dowritetofile(p[1], p[2], p[3]);
+  end else if (fncname='createworddoc') then begin
+    createworddoc(p[1]);
+  end else if (fncname='copyfile') then begin
+    copyfileto(p[1], p[2]);
+  end else if FncName = 'getsubtotal' then begin
+     s := FloatToStr(GetSubTotal(P[1], StrToInt(p[2])));
+  end else if FncName = 'getsubdelimitedstr' then begin
+     s := GetSubDelimitedStr(P[1], p[2],p[3], StrToInt(p[4]));
+  end else if FncName = 'fill' then begin
+     if assigned(OnFill) then
+        OnFill(p[1]);
+  end else if FncName = 'bulkprinting' then begin
+     if assigned(OnBulkPrinting) then
+        OnBulkPrinting(p[1]);
+  end else if fncname = 'initgrid' then begin
+    if assigned(OnInitGrid) then OnInitGrid(StrToint(p[1]));
+  end else if fncname = 'refreshframe' then begin
+    if assigned(OnRefreshFrame) then OnRefreshFrame(StrToint(p[1]));
+  end else if fncname='dofillgrid' then begin
+    if assigned(OnDoFillGrid) then OnDoFillGrid(p[1]);
+  end else if FncName = 'createpkt' then begin
+     if assigned(OnCreatePkt) then
+        OnCreatePkt(p[1],p[2]);
+  end else if fncname='loadandsave' then begin
+    if assigned(onLoadAndSave) then
+      OnLoadAndSave(p[1], p[2]);
+  end else if fncname='sqlresave' then begin
+    SqlResave(p[1]);
+  end else if fncname='savetrans' then begin
+    if assigned(OnSaveTrans) then
+      s := OnSaveTrans();
+  end else if fncname='validatetrans' then begin
+    if assigned(OnValidateTrans) then
+      s := OnValidateTrans();
+  end else if FncName = 'randomno' then begin
+    s := RandomNo;
+  end else if FncName = 'saveimage' then begin
+    SaveImage(p[1],p[2],StrToFloat(p[3]),p[4]);
+  end else if fncname='copytrans' then begin
+    if P[2] = '' then begin
+      if assigned(OnCopyTrans) then
+        OnCopyTrans(StrToFloat(p[1]));
+    end else begin
+      if assigned(OnCopyTransAndSave) then
+        OnCopyTransAndSave(p[1],StrToFloat(p[2]),p[3]);
+    end;
+  end else if fncname='duptrans' then begin
+    if assigned(OnDupTrans) then
+      OnDupTrans(p[1],StrToFloat(p[2]),p[3],StrToFloat(p[4]));
+  end else if FncName = 'withtransaction' then
+    s := WithTransaction(p[1],StrToFloat(p[2]))
+  else if FncName = 'endwith' then
+    s := EndWith
+  else if fncname='setvalidvalue' then begin
+    if assigned(OnSetValidValue) then
+      s := OnSetValidValue(p[1],StrToInt(p[2]));
+  end else if fncname='fetchdata' then begin
+    FetchData(p[1]);
+  end else if fncname = 'setcaption' then begin
+    if assigned(OnSetCaption) then OnSetCaption(p[1],p[2]);
+  end else if fncname = 'newtrans' then begin
+    if assigned(OnNewTrans) then OnNewTrans;
+  end else if fncname='refreshfield' then begin
+    if assigned(OnRefreshField) then
+      s := OnRefreshField(p[1],StrToInt(p[2]));
+  end else if fncname = 'settabstop' then begin
+    if assigned(OnSetTabStop) then OnSetTabStop(p[1]);
+  end else if fncname = 'setfont' then begin
+    if assigned(OnSetFont) then OnSetFont(p[1],p[2],p[3],p[4]);
+  end else if fncname = 'sendmail' then begin
+    if assigned(OnSendMail) then OnSendMail((LoadXmlData(p[1])).DocumentElement);
+  end else if fncname = 'getsourceimage' then begin
+     s := GetSourceImage(p[1],p[2],StrToFloat(p[3]));
+  end else if fncname = 'setfieldstatus' then begin
+    if assigned(OnSetFieldStatus) then OnSetFieldStatus(p[1])
+  end else if fncname = 'setfocus' then begin
+    if assigned(OnSetFocus) then OnSetFocus(p[1],StrToInt(p[2]));
+  end else if fncname = 'setbtnstatus' then begin
+    if assigned(OnSetBtnStatus) then OnSetBtnStatus(p[1]);
+  end else if fncname = 'setdcstatus' then begin
+    if assigned(OnSetDcStatus) then OnSetDcStatus(p[1]);
+  end else if fncname = 'fillonload' then begin
+    if assigned(OnFillOnLoad) then OnFillOnLoad(p[1]);
+  end else if fncname = 'domassupdate' then begin
+    DoMassUpdate;
+  end else if fncname = 'postrowdatafromiview' then begin
+    if assigned(PostRowDataFromIview) then PostRowDataFromIview(p[1],p[2],p[3]);
+  end else if fncname = 'resendworkflowmail' then begin
+    if assigned(ReSendWorkFlowMail) then ReSendWorkFlowMail(p[1],StrToFloat(p[2]),StrToInt(p[3]));
+ end else if fncname = 'sendtosign' then
+  begin
+    SendToSign(p[1],p[2]);
+  end else if fncname='duprow' then begin
+    if assigned(OnDupRow) then
+      OnDupRow(StrToInt(p[1]),StrToInt(p[2]),StrToInt(p[3]));
+  end else if fncname='selectnext' then begin
+    if assigned(OnSelectNext) then
+      OnSelectNext((p[1]),StrToInt(p[2]));
+  end else if fncname='selectfirst' then begin
+    if assigned(OnSelectFirst) then
+      OnSelectFirst((p[1]),StrToInt(p[2]));
+  end else if fncname = 'executeapi' then begin
+    if p[10] <> '' then
+      s := ExecuteAPI(p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8],p[9],p[10])
+    else if p[9] <> '' then
+      s := ExecuteAPI(p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8],p[9])
+    else if p[8] <> '' then
+      s := ExecuteAPI(p[1],p[2],p[3],p[4],p[5],p[6],p[7],p[8])
+    else
+      s := ExecuteAPI(p[1],p[2],p[3],p[4],p[5],p[6],p[7])
+  end
+  else if fncname = 'createiview' then
+    s := CreateIview(p[1],p[2],p[3],p[4])
+  else if fncname = 'saveiview' then
+    SaveIview(p[1],p[2])
+  else if fncname = 'deleteiview' then
+    s := DeleteIview(p[1])
+  else if fncname = 'designfastreport' then
+    s := DesignFastReport(p[1],p[2],p[3]);
+  except
+    On E : Exception do begin
+      if assigned(axp) then begin
+         axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\CallFunction - '+e.Message);
+         axp.dbm.gf.DoDebug.msg('  '+E.Message);
+         if raiseonactionerr then axp.dbm.gf.ErrorInActionExecution := E.Message;
+         if axp.dbm.gf.ErrorInActionExecution <> '' then raise exception.Create(axp.dbm.gf.ErrorInActionExecution);
+      end;
+    end;
+  end;
+end;
+
+function TProfitEVal.GetCostRate(ItemId: extended; DocDate: TDateTime; IssueQty: Extended; VMethod, plocid: String;pCompid:Extended=0;pBranchid:Extended=0;pBatchid:Extended=0): Extended;
+var
+  FrameNo, RowNo, p: integer;
+begin
+  Result := 0;
+  if not assigned(ValueStock) then exit;
+  if (not assigned(storedata)) and (not ValueStock.QueryMode) then exit;
+  valuestock.dbm:=axp.dbm;
+  p := VarList.IndexOf('ActiveFrame');
+  if p <> -1 then FrameNo := StrToInt(ValueList[p]) else FrameNo := 1;
+  p := VarList.IndexOf('ActiveRow');
+  if p <> -1 then RowNo := StrToInt(ValueList[p]) else RowNo := 1;
+  if (assigned(StoreData)) and (getvarvalue('recordid') <> '0') then
+    ValueStock.ParentDocId := StoreData.GetParentDocId(FrameNo, RowNo)
+  else
+    ValueStock.ParentDocId := 0;
+  Result := ValueStock.GetCostRate(Itemid, DocDate, IssueQty, VMethod, plocid, pCompid, pBranchid, pBatchid);
+end;
+
+function TProfitEVal.GetStockValue(ItemId: extended; DocDate: TDateTime; IssueQty: Extended; VMethod, plocid: String;pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+var
+  FrameNo, RowNo, p: integer;
+begin
+  Result := 0;
+  if not assigned(ValueStock) then exit;
+  valuestock.dbm:=axp.dbm;
+  p := VarList.IndexOf('ActiveFrame');
+  if p <> -1 then FrameNo := StrToInt(ValueList[p]) else FrameNo := 1;
+  p := VarList.IndexOf('ActiveRow');
+  if p <> -1 then RowNo := StrToInt(ValueList[p]) else RowNo := 1;
+  ValueStock.ParentDocId := 0;
+  Result := ValueStock.GetStockValue(Itemid, DocDate, IssueQty, VMethod, plocid, pCompid, pBranchid, pBatchid);
+  RegisterVar('Op_StockQty', 'n', FloatToStr(ValueStock.Op_stockQty));
+  RegisterVar('Op_StockValue', 'n', FloatToStr(ValueStock.Op_StockValue));
+end;
+
+function TProfitEVal.GetClosingStock(ItemId: extended; DocDate: TDateTime; VMethod, plocid: String; pCompid:Extended=0;pBranchid:Extended=0; pBatchid:Extended=0): Extended;
+var
+  FrameNo, RowNo, p: integer;
+begin
+  Result := 0;
+  if not assigned(ValueStock) then exit;
+  valuestock.dbm:=axp.dbm;
+  p := VarList.IndexOf('ActiveFrame');
+  if p <> -1 then FrameNo := StrToInt(ValueList[p]) else FrameNo := 1;
+  p := VarList.IndexOf('ActiveRow');
+  if p <> -1 then RowNo := StrToInt(ValueList[p]) else RowNo := 1;
+  ValueStock.ParentDocId := 0;
+
+  Result := ValueStock.GetClosingStock(Itemid, DocDate, VMethod, plocid, pCompid, pBranchid, pBatchid);
+
+  RegisterVar('Op_StockQty', 'n', FloatToStr(ValueStock.Op_stockQty));
+  RegisterVar('Op_StockValue', 'n', FloatToStr(ValueStock.Op_StockValue));
+  RegisterVar('Rec_StockQty', 'n', FloatToStr(ValueStock.Rec_stockQty));
+  RegisterVar('Rec_StockValue', 'n', FloatToStr(ValueStock.Rec_StockValue));
+  RegisterVar('Iss_StockQty', 'n', FloatToStr(ValueStock.Iss_stockQty));
+  RegisterVar('Iss_StockValue', 'n', FloatToStr(ValueStock.Iss_StockValue));
+end;
+
+Function TProfitEVal.Getinteger(Value : Real) :Real;
+begin
+ Result := int(value);
+end;
+
+Function TProfitEVal.GetLength(Value : String) :integer;
+begin
+ Result := Length(value);
+end;
+
+Function TProfitEval.FieldChanged(FieldName:String;RowNo:integer):String;
+var kf, k:integer;
+    value, oldvalue : String;
+begin
+  Result := 'F';
+  if FromDev then AddToVarUsed(FieldName);
+  if not assigned(storedata) then exit;
+  kf := StoreData.GetFieldIndex(FieldName, RowNo);
+  if kf=-1 then exit;
+  if pFieldRec(StoreData.Fieldlist[kf]).RecordId=0 then exit;
+  OldValue := pFieldRec(StoreData.Fieldlist[kf]).OldValue;
+  k := Varlist.IndexOf(FieldName);
+  if k < 0 then exit;
+  value := ValueList[k];
+  if OldValue <> value then result := 'T';
+  if lowercase(pFieldRec(StoreData.Fieldlist[kf]).DataType)='n' Then begin
+    if StrToFloat(OldValue) <> strToFloat(value) then result := 'T' else result:='F';
+  end;
+end;
+
+//09-07-2002 incorporated function for modulo
+Function TProfitEval.GetMod(Value :Integer; Divisor : Integer):integer;
+begin
+ Result := Value Mod Divisor
+end;
+
+Function TprofitEval.GetSeperatorCount(Const SrcStr: String; Seperator: Char): integer;
+Var
+  ind, cnt: integer;
+  Src: String;
+Begin
+  src := SrcStr;
+  cnt := 0;
+  ind := pos(Seperator, Src);
+  While ind > 0 Do
+  Begin
+    inc(cnt);
+    delete(Src, 1, ind);
+    ind := pos(Seperator, Src);
+  End;
+  result := cnt;
+End;
+
+Function TprofitEval.GetNthString(SrcString: String; StrPos: integer): String;
+Var
+  i, k: integer;
+Begin
+  Result := '';
+  i := 1;
+  k := 1;
+  while (k <= strpos) and (i<=length(srcstring)) do begin
+   if srcstring[i] = ',' then
+    inc(k)
+   else if k = strpos then
+    result := result + srcstring[i];
+   inc(i);
+  end;
+End;
+
+Function TProfitEval.SetValue(FieldName:String; Rowno:integer; Value:String):String;
+var k:integer;
+    tempsd : TStoreData;
+begin
+result := 'F';
+if FromDev then AddToVarUsed(FieldName);
+if not assigned(storedata) then exit;
+if (fieldname ='') or (rowno < 1) then exit;
+if workonstoredata then begin
+  if assigned(WithTransStoreData) then
+    tempsd := WithTransStoreData
+  else
+    tempsd := Storedata;
+  k := StoreData.GetFieldIndex(FieldName, rowno);
+  if k = -1 then begin
+    storedata.SubmitValue(FieldName, Rowno, Value, '', 0, 0, 0);
+    k := StoreData.GetFieldIndex(FieldName, rowno);
+  end else
+  begin
+    pFieldRec(StoreData.fieldlist[k]).value := value;
+    pFieldRec(StoreData.fieldlist[k]).ClientNotify := true;
+  end;
+  if k <> -1 then
+    RegisterVar(FieldName,Char(pFieldRec(StoreData.fieldlist[k]).DataType[1]),value)
+end;
+if assigned(onsetvalue) then
+  OnSetValue(FieldName, RowNo, Value);
+result := 'T';
+end;
+
+function TProfitEval.SetSequence(FieldName, Prefix:String):String;
+begin
+ result := 'T';
+ if assigned(onsetsequnce) then
+  OnSetSequnce('', fieldname, prefix);
+end;
+
+function TProfitEVAL.SendToSign(TransId, FormName: String): String;
+begin
+  Result := 'T';
+  if Assigned(OnSendToSign) then
+    OnSendToSign(TransId, FormName,
+                  GetCurrentDir + '\Axpert\'+ axp.dbm.gf.sessionid + '\'+ ExtractFileName(FormName));
+end;
+
+function TProfitEval.SetExtSequence(sTransid, FieldName, Prefix:String):String;
+begin
+ result := 'T';
+ if assigned(onsetsequnce) then
+  OnSetSequnce(sTransid, fieldname, prefix);
+end;
+
+Function TprofitEval.FormatAmount(Value : Real; DecLen :Integer;withComma,MillionRep,NegativeRep,PositiveRep : String) :String;
+begin
+  Result := FormatValue(Floattostr(Abs(Value)),DecLen,WithComma,MillionRep);
+  if (NegativeRep = 'br') or (PositiveRep = 'br') then begin
+    if (Value < 0) then
+      Result := '(' + Result + ')'
+  end else begin
+    if Value < 0 then
+      Result := Result + ' ' + NegativeRep
+    else
+      Result := Result + ' ' + PositiveRep;
+    Result := trim(result);
+  end;
+end;
+
+Function TProfitEval.FormatAccAmount(Value : Real ; DecLen :Integer;withComma,MillionRep,MALIE,Rep :String):String;
+begin
+  Result := FormatValue(FloattoStr(Abs(value)),DecLen,WithComma,MillionRep);
+  MALIE := Lowercase(Trim(MALIE));
+  Rep := Lowercase(Rep);
+  if (MALIE = 'a') or (MALIE = 'e') then begin
+    if (Value < 0) and (Rep = 'br')  then
+      Result := '(' + Result + ')'
+    else if Value < 0 then
+      Result := Result + ' ' +Rep
+  end else if (MALIE = 'l') or (MALIE = 'i') then begin
+    if (Value > 0) and (Rep = 'br') then
+      Result := '(' + Result + ')'
+    else if Value > 0 then
+      Result := Result + ' ' +Rep
+  end;
+end;
+
+Function TProfitEval.FormatValue(value: String; Declen: integer;ApplyCommas,MillionRep :String): String;
+Var
+  decval: String;
+  decpos, i: integer;
+Begin
+  If value = '' Then Begin
+    result := '';
+    exit;
+  End;
+  decval := '';
+  decpos := pos(axp.dbm.gf.LocDecimalSeparator, value);
+
+  If (decpos > 0) Then Begin
+    if DecLen > 0 then begin
+     value := value + '000000000000000000000';
+     result := copy(value, 1, decpos + declen)
+    end else
+     Result := Value;
+  End Else Begin
+    For i := 1 To declen Do
+      decval := decval + '0';
+    IF DecLen > 0 then
+     result := value + axp.dbm.gf.LocDecimalSeparator + decval
+    else
+     Result := Value;
+  End;
+  if (Lowercase(ApplyCommas)= 't') then
+    Result :=  InsertCommas(Result,MillionRep);
+End;
+
+Function TProfitEval.InsertCommas(Value,Millions: String): String;
+Var
+  DecPos, CommaAfter: integer;
+  NegVal: String;
+Begin
+  value := RemoveCommas(trim(Value));
+  If copy(value, 1, 1) = '-' Then Begin
+    NegVal := '-';
+    delete(Value, 1, 1);
+  End Else NegVal := '';
+  DecPos := Pos(axp.dbm.gf.LocDecimalSeparator, Value);
+  If DecPos = 0 Then
+    DecPos := Length(Value) + 1;
+  If (Lowercase(Millions) =  't') Then CommaAfter := 3 Else CommaAfter := 2;
+  If ((DecPos - 3) > 1) Then // if the amount is in thousands or higher
+  Begin
+    Result := Copy(Value, DecPos - 3, Length(Value));
+    Value := Copy(Value, 1, Length(Value) - Length(Result));
+    While (Length(Value) > (CommaAfter - 1)) Do
+    Begin
+      Result := Copy(Value, Length(Value) - (CommaAfter - 1), CommaAfter) + ','
+        + Result;
+      Value := Copy(Value, 1, Length(Value) - CommaAfter);
+    End;
+    If Length(Value) > 0 Then Result := Value + ',' + Result;
+  End
+  Else
+    Result := Value;
+  Result := NegVal + Result;
+End;
+
+Function TProfitEval.RemoveCommas(S: String): String;
+Var
+  k: integer;
+Begin
+  While true Do Begin
+    k := pos(',', s);
+    If k = 0 Then break;
+    delete(s, k, 1);
+  End;
+  Result := S;
+End;
+
+Function TProfitEval.LeftPad(S: String; MaxLength: integer; c: Char): String;
+Var
+  l, i: integer;
+Begin
+  Result := S;
+  l := Length(S);
+  If l >= MaxLength Then exit;
+  For i := l + 1 To MaxLength Do Begin
+    Result := C + Result;
+  End;
+End;
+
+Function TProfitEval.Pad(S: String; MaxLength: integer; c: Char): String;
+Var
+  l, i: integer;
+Begin
+  Result := S;
+  l := Length(S);
+  If l >= MaxLength Then exit;
+  For i := l + 1 To MaxLength Do Begin
+    Result := Result + C;
+  End;
+End;
+
+function TProfitEVAL.GetMin(pFieldName: String): integer;
+var
+  i, ColNo, MinRow: integer;
+  MinValue, V: Real;
+  SMin: String;
+begin
+  Result := -1;
+  if FromDev then AddToVarUsed(pFieldName);
+  if WorkOnStoreData then begin
+    Result := GetMinFromSD(pFieldName);
+    exit;
+  end;
+end;
+
+function TProfitEVAL.GetminFromSD(pFieldName: String): integer;
+var i: integer;
+  MinValue, V: Real;
+  SMin: String;
+begin
+  Result := -1;
+  if not assigned(storedata) then exit;
+  PFieldName := lowercase(PFieldName);
+  MinValue := 0;
+  SMin := '';
+  for i := 0 to storedata.FieldList.Count - 1 do begin
+    if (lowercase(pFieldRec(StoreData.FieldList[i]).FieldName) = PFieldName) and
+       (pFieldRec(StoreData.FieldList[i]).RowNo > 0) and
+       (pFieldRec(StoreData.FieldList[i]).Value <> '') then begin
+      if lowercase(pFieldRec(StoreData.FieldList[i]).DataType) = 'n' then begin
+        try
+          v := StrToFloat(pFieldRec(StoreData.FieldList[i]).Value);
+        except on E:Exception do
+          begin
+            axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\GetminFromSD - '+e.Message);
+            v := 0;
+          end;
+        end;
+        if (v < MinValue) or (result = -1) then begin
+          MinValue := V;
+          Result := pFieldRec(StoreData.FieldList[i]).RowNo;
+        end;
+      end else begin
+        if (pFieldRec(StoreData.FieldList[i]).Value < SMin) or (result = -1) then begin
+          SMin := pFieldRec(StoreData.FieldList[i]).Value;
+          Result := pFieldRec(StoreData.FieldList[i]).RowNo;
+        end;
+      end;
+    end;
+  end;
+end;
+
+procedure TProfitEval.SQLRegVar(SQLText:String);
+var t:String;
+begin
+  if not assigned(axp.dbm) then exit;
+  work := axp.dbm.GetXDS(work);
+  work.buffered := True;
+  work.CDS.CommandText := sqltext;
+  ReplaceParams(work);  
+  work.open;
+  if (assigned(work.cds.findfield('varname'))) and (assigned(work.cds.findfield('varvalue'))) and (assigned(work.cds.findfield('vartype')))then begin
+    work.CDS.first;
+    while not work.cds.eof do begin
+      t := work.cds.fieldbyname('vartype').asstring;
+      RegisterVar(work.cds.fieldbyname('varname').asstring, t[1], work.cds.fieldbyname('varvalue').asstring);
+      work.cds.next;
+    end;
+  end;
+  work.close;
+  work.Free;
+  work := nil;
+end;
+
+function TProfitEval.GetRoundOff(ColumnName, RowId:String; SumTill, RoundTo:Integer):Extended;
+var v:extended;
+    s:String;
+    i,rcount : integer;
+begin
+  RCount := GetRowCount(ColumnName);
+  if (SumTill > 0) and (SumTill < Rcount) then Rcount := SumTill;
+  v := 0;
+  for i:=1 to RCount do begin
+    s := GetValue(RowId,i);
+    if lowercase(s) = 't' then begin
+      s := GetValue(ColumnName, i);
+      if s <> '' then v := v+strtofloat(s);
+    end;
+  end;
+  Result := Rnd(v, RoundTo) - v;
+end;
+
+function TProfitEval.SetSystemVar(varname, VarValue:String):String;
+begin
+  result := '';
+  varname := lowercase(varname);
+  if varname = 'companyname' then begin
+    axp.dbm.gf.Companyname := varvalue;
+    RegisterVar('CompanyName', 'c', varvalue);
+  end else if varname = 'username' then begin
+    axp.dbm.gf.UserName := VarValue;
+    RegisterVar('UserName', 'c', axp.dbm.gf.username);
+  end else if varname = 'usercategory' then begin
+    axp.dbm.gf.UserCategory := Varvalue;
+    RegisterVar('UserCategory', 'c', axp.dbm.gf.usercategory);
+  end else if varname = 'userdepartment' then begin
+    axp.dbm.gf.UserDepartment := varvalue;
+    RegisterVar('UserDepartment', 'c', axp.dbm.gf.userdepartment);
+  end else if varname = 'dbrep' then begin
+    axp.dbm.gf.DbRep := Varvalue;
+    RegisterVar('DbRep', 'c', axp.dbm.gf.dbrep);
+  end else if varname = 'crrep' then begin
+    axp.dbm.gf.CrRep := VarValue;
+    RegisterVar('CrRep', 'c', axp.dbm.gf.crrep);
+  end else if varname = 'profitpath' then begin
+    axp.dbm.gf.ProfitPath := VarValue;
+    RegisterVar('ProfitPath', 'c', axp.dbm.gf.ProfitPath);
+  end else if varname = 'axpertpath' then begin
+    axp.dbm.gf.AxpertPath := VarValue;
+    RegisterVar('AxpertPath', 'c', axp.dbm.gf.AxpertPath);
+  end else if varname = '_maincurr' then begin
+    axp.dbm.gf._MainCurr := VarValue;
+    RegisterVar('_MainCurr', 'c', axp.dbm.gf._MainCurr);
+  end else if varname = '_subcurr' then begin
+    axp.dbm.gf._subCurr := VarValue;
+    RegisterVar('_subCurr', 'c', axp.dbm.gf._SubCurr);
+  end else if varname = '_currdecimal' then begin
+    axp.dbm.gf._CurrDecimal := StrToInt(VarValue);
+    RegisterVar('_CurrDecimal', 'n', varvalue);
+  end else if varname = 'finyrst' then begin
+    axp.dbm.gf.finyrst := StrToDateTime(varvalue);
+    RegisterVar('finyrst', 'd', varvalue);
+  end else if varname = 'finyred' then begin
+    axp.dbm.gf.finyred := StrToDateTime(varvalue);
+    RegisterVar('finyred', 'd', varvalue);
+  end else if varname = 'afinyrst' then begin
+    axp.dbm.gf.afinyrst := StrToDateTime(varvalue);
+    RegisterVar('afinyrst', 'd', varvalue);
+  end else if varname = 'afinyred' then begin
+    axp.dbm.gf.afinyred := StrToDateTime(varvalue);
+    RegisterVar('afinyred', 'd', varvalue);
+  end else if varname = 'basecurrencyid' then begin
+    axp.dbm.gf.basecurrencyid := strtofloat(varvalue);
+    RegisterVar('basecurrencyid', 'n', varvalue);
+  end else if varname = '_millions' then begin
+    axp.dbm.gf.millions := varvalue = 't';
+    RegisterVar('_millions', 'c', uppercase(varvalue));
+  end;
+end;
+
+procedure TProfitEval.XRun(Fname:String);
+var p:integer;
+    s,s1,s2,s3,s4 : String;
+    fn : String;
+begin
+  fn := fname;
+  if axp.dbm.gf.isservice then
+  begin
+     axp.dbm.gf.SessionId := '~'+ Fname ;
+  end
+  else begin
+    try
+     if fn = '' then exit;
+     p := pos('%', fn);
+     if p > 0 then begin
+       ShellExecute(Application.Handle,'open', PChar(trim(copy(fn,1,p-1))), PChar(trim(copy(fn,p+1,5000))), nil, SW_SHOWNORMAL) ;
+     end else begin
+       ShellExecute(Application.Handle,'open', PChar(fn), nil, nil, SW_SHOWNORMAL) ;
+     end;
+
+ {    if p > 0 then
+     begin
+       s := trim(copy(fname,1,p-1));
+       s1 := trim(copy(fname,p+1,1000));
+       s3 := '';
+       while True do
+       begin
+         p := pos(',', s1);
+         if p > 0 then
+         s2 := trim(copy(s1,1,p-1))
+         else s2 := s1;
+         if copy(s2,1,1) = ':' then delete(s2,1,1);
+         delete(s1,1,p);
+         s1 := trim(s1);
+         s4 := GetVarValue(s2);
+         if s4 = '' then s4 := ' ';
+         s3 := s3 + ' ' + '"' + s4 +'"';
+         if p = 0 then break;
+       end;
+       if s3 <> '' then s1 := trim(s3);
+       ShellExecute(Application.Handle,'open', PChar(s), PChar(s1), nil, SW_SHOWNORMAL) ;
+     end else begin
+       ShellExecute(Application.Handle,'open', PChar(fname), nil, nil, SW_SHOWNORMAL) ;
+     end;}
+    except
+      on e:exception do begin
+      axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\XRun - '+e.Message);
+      showmessage(e.Message);
+      end;
+    end;
+  end;
+end;
+
+function TProfitEval.OpenDialog : String;
+begin
+  if OpenDialog1.Execute then
+    result := OpenDialog1.FileName
+  else
+    result := '';
+end;
+
+function TProfitEval.SaveDialog : String;
+begin
+  if SaveDialog1.Execute then
+    result := SaveDialog1.FileName
+  else
+    result := '';
+  {if OpenDialog1.Execute then
+    result := OpenDialog1.FileName
+  else
+    result := '';   }
+end;
+
+procedure TProfitEval.InitBOM;
+begin
+  bom := TBOM.create;
+  bom.dbm := axp.dbm;
+  bom.axp := axp;
+  bom.OnReplaceTempTable := OnReplaceTempTable;
+end;
+
+procedure TProfitEval.DoFileWrite(Formatfile, TargetFile, Instructions:String);
+var slist, fnames, trglist : TStringlist;
+    f, frms, s, x, v:String;
+    bk:TBookMark;
+    i, fno, j, c, r, sp, ep : integer;
+    fld:pfld;
+begin
+  slist:=TStringList.create;
+  fnames:=TStringList.create;
+  trglist:=TStringList.create;
+  slist.loadfromfile(formatfile);
+  i:=0;
+  frms:='';
+  //loop on every row
+  while i<slist.count do begin
+    s:=slist[i];
+
+    //loop for every field
+    while true do begin
+      sp := pos('{',s);
+      if sp=0 then break;
+      ep := pos('}',s);
+      if ep=0 then break;
+      f:=copy(s,sp+1, ep-sp-1);
+
+      if not assigned(storedata) then begin
+        v := GetVarValue(f);
+        delete(s, sp, ep-sp+1);
+        insert(v, s, sp);
+      end else begin
+        //Copy grid line
+        fld:=storedata.structdef.GetField(f);
+        if not assigned(fld) then begin
+          delete(s, sp, ep-sp+1);
+          continue;
+        end;
+
+        if fld.AsGrid then begin
+          fno := fld.FrameNo;
+          if pos(','+inttostr(fno)+',', frms) = 0 then begin
+            c := storedata.GetRowCount(fno);
+            for j:=1 to c-1 do
+              slist.Insert(i,s);
+            frms := frms+','+inttostr(fno)+',';
+          end;
+        end;
+
+        //Find rowno
+        fnames.add(f);
+        r:=0;
+        for j:=0 to fnames.count-1 do
+          if fnames[j]=f then inc(r);
+
+        v := storedata.GetFieldValue(f, r);
+        delete(s, sp, ep-sp+1);
+        insert(v, s, sp);
+      end;
+    end;
+
+    trglist.Add(s);
+    inc(i);
+  end;
+  trglist.SaveToFile(targetfile);
+  slist.free;
+  fnames.free;
+  trglist.Free;
+end;
+
+
+//MassUpadate - Applicationmanager
+//will update the definitions in Application level
+procedure TProfitEVAL.DoMassUpdate;
+var
+  sdxml : IXMLDocument;
+  sdxmlNode,tmpnode,targetNode,dnode : IXMLNode;
+  i,j,Idx : Integer;
+  changeXmlNode,Cat,transid,temptid,fieldname,tNodeVal,lstr,cstr,EStr : String;
+  changeprop,SearchStr,Replacestr,Readonly,Visible,ReportFile : String;
+  QXds : TXDS;
+  sl : TStringList;
+  Rep : Textfile;
+begin
+  try
+  if WorkOnStoreData then begin
+    if not assigned(storedata) then exit;
+    if not assigned(axp.dbm) then exit;
+    ReportFile := Axp.dbm.gf.StartPath + 'Results.txt';
+    AssignFile(Rep, ReportFile);
+    ReWrite(Rep);
+    sl := TStringList.Create;
+    work := axp.dbm.GetXDS(nil);
+    QXds := Axp.dbm.GetXDS(nil);
+    QXds.buffered := True;
+    QXds.CDS.CommandText := 'select * from Axp_AppMgr order by tstruct';
+    QXds.open;
+    QXds.CDS.first;
+    changeprop := storedata.GetFieldValue('changewhat', 1);
+    searchstr :=  storedata.GetFieldValue('searchstr', 1);
+    replacestr :=  storedata.GetFieldValue('replacestr', 1);
+    readonly :=  lowercase(storedata.GetFieldValue('readonly', 1));
+    visible :=  lowercase(storedata.GetFieldValue('visible', 1));
+    changeXmlNode := findChangeXmlNodeandcat(lowercase(changeprop));
+    Cat := axp.dbm.gf.getNthString(changeXmlNode,2);
+    changeXmlNode := axp.dbm.gf.getNthString(changeXmlNode,1);
+    WriteLn(Rep, 'Change Management Console Update Summary');
+    WriteLn(Rep, '************************************');
+    while not QXds.cds.eof do begin
+      transid := QXds.cds.fieldbyname('tstruct').asstring;
+      fieldname :=  QXds.cds.fieldbyname('fname').asstring;
+      FieldName := lowercase(FieldName);
+      if ((temptid <> '') and (temptid <> transid)) Then begin
+        WriteLn(Rep, 'Updating Tstruct : '+ temptid );
+        //WriteLn(Rep, 'Updating FieldName : '+ fieldname );
+        if assigned(OnCallStoreDependency) then begin
+          EStr := OnCallStoreDependency(sdxml,temptid);
+          if Estr = '' then begin
+             try
+               axp.SetStructure('tstructs', temptid, '', sdxml);
+             Except on E:Exception do
+               EStr := E.Message;
+             end;
+          end;
+          if EStr = '' then
+          begin
+            Axp.dbm.Commit(Axp.dbm.gf.connectionname);
+            WriteLn(Rep, 'Tstruct : '+ temptid+' has been updated successfully.' );
+            WriteLn(Rep);
+          end
+          else begin
+            Axp.dbm.Rollback(Axp.dbm.gf.connectionname);
+            WriteLn(Rep, 'Error : '+ EStr );
+            WriteLn(Rep);
+          end;
+        end;
+      end;
+      if (temptid <> transid)  then begin
+        sdxml := axp.GetStructure('tstructs', transid, '', '');
+        sdxmlNode := sdxml.DocumentElement;
+        sdxmlNode.Attributes['mupd'] := 'y';
+        sdxmlNode.Attributes['mupddt'] := formatDateTime(Axp.dbm.gf.ShortDateFormat.ShortDateFormat,now);//DateTimeToStr(FloatToDateTime(Now));
+        Axp.dbm.StartTransaction(Axp.dbm.gf.connectionname);
+      end;
+      tNodeVal := '';
+      tmpnode := sdxmlNode.ChildNodes.FindNode(FieldName);
+      if Assigned(tmpnode) then begin
+         if changeXmlNode = 'a22' then begin
+            dnode := tmpnode.ChildNodes[xml_Details];
+            targetNode := dnode.ChildNodes[xml_sQL];
+            sl.clear;
+            if (targetNode.ChildNodes.Count = 0) then
+              sl.Add(vartostr(targetNode.NodeValue))
+            else begin
+              for j := 0 to targetNode.ChildNodes.Count-1 do
+                sl.Add(vartostr(targetNode.ChildNodes[j].NodeValue));
+            end;
+            if Trim(sl.Text) <> '' then tNodeVal := Trim(sl.Text);
+         end
+         else begin
+            targetNode := tmpnode.ChildNodes.FindNode(changeXmlNode);
+            if Assigned(targetNode) then tNodeVal := VartoStr(targetNode.NodeValue);
+         end;
+         if Assigned(targetNode) then begin
+            //if (searchstr <> '') and (replacestr <> '') then
+            if (searchstr = '') and (replacestr <> '')  then
+                tNodeVal := replacestr
+            else
+                tNodeVal := StringReplace(tNodeVal, searchstr, replacestr,
+                        [rfReplaceAll, rfIgnoreCase]);
+            //else if replacestr = '' then tNodeVal := replacestr;
+            if changeXmlNode = 'a22' then  begin
+               targetNode.ChildNodes.Clear;
+               lStr := tNodeVal;
+               While Length(lstr) > 0 do
+               begin
+                 cstr := Copy(lstr,1,100);
+                 targetNode.AddChild('l').NodeValue:=cstr;
+                 Delete(lstr,1,100);
+               end;
+            end
+            else
+               targetNode.NodeValue := tNodeVal;
+         end;
+         if (readonly <> 'n/a')  then begin
+            tmpnode.ChildNodes.FindNode(xml_ReadOnly).NodeValue := ifthen((lowercase(readonly)='yes'),'True','False');
+            //tmpnode.ChildNodes.FindNode(xml_Tabstop).NodeValue :=  ifthen((lowercase(readonly) = 'yes'),'False','True');
+         end;
+         if (visible <> 'n/a') then
+            tmpnode.ChildNodes.FindNode(xml_Hide).NodeValue :=  ifthen((lowercase(visible) = 'yes'),'False','True');
+         UpdateAxpFldsTable(transid,FieldName,tNodeVal);
+
+      end;
+      temptid := transid;
+      QXds.cds.next;
+    end;
+    WriteLn(Rep, 'Updating Tstruct : '+ transid );
+    //WriteLn(Rep, 'Updating FieldName : '+ fieldname );
+    if assigned(OnCallStoreDependency) then begin
+      EStr := OnCallStoreDependency(sdxml,transid);
+      if Estr = '' then begin
+         try
+           axp.SetStructure('tstructs', transid, '', sdxml);
+         Except on E:Exception do
+           EStr := E.Message;
+         end;
+      end;
+      if EStr = '' then
+      begin
+        Axp.dbm.Commit(Axp.dbm.gf.connectionname);
+        WriteLn(Rep, 'Tstruct : '+ transid+' has been updated successfully.' );
+        WriteLn(Rep);
+      end
+      else begin
+        Axp.dbm.Rollback(Axp.dbm.gf.connectionname);
+        WriteLn(Rep, 'Error : '+ EStr );
+        WriteLn(Rep);
+      end;
+    end;
+  end;
+  reset(rep);
+  //read(f,s2);
+  if assigned(OnShowReport) then
+      OnShowReport;
+  CloseFile(rep);
+  finally
+    FreeAndNil(sl);
+    work.close;
+    work.Free;
+    work := nil;
+    QXds.close;
+    QXds.Free;
+    QXds := nil;
+  end;
+end;
+
+//Updating AxpFlds table for MassUpdate - Application Manager
+Procedure TProfitEVAL.UpdateAxpFldsTable(tid,fname,modifiedVal:string);
+var i : integer;
+    wc,ErrMsg,Modifiedfld,changeprop,Hide,readOnly : String;
+    stm : TStringStream;
+begin
+  Modifiedfld := '';
+  changeprop := lowercase(storedata.GetFieldValue('changewhat', 1));
+  readonly :=  lowercase(storedata.GetFieldValue('readonly', 1));
+  hide :=  lowercase(storedata.GetFieldValue('visible', 1));
+  if changeprop = 'caption' then Modifiedfld := 'caption'
+  else if changeprop = 'expression' then Modifiedfld := 'expression'
+  else if changeprop = 'validation' then Modifiedfld := 'valexpr'
+  else if changeprop = 'sql' then Modifiedfld := 'fldsql'
+  else if changeprop = 'source field in genmap' then Modifiedfld := 'srcfld'
+  else if changeprop = 'source field in mdmap' then Modifiedfld := 'srcfld'
+  else if changeprop = 'source field in fillgrid' then Modifiedfld := 'srcfld';
+  ErrMsg := '';
+  try
+    wc := 'tstruct = '+Quotedstr(Tid)+' and fname = '+QuotedStr(Fname);
+    work.Edit('AxpFlds',wc);
+    if (Modifiedfld <> 'fldsql') and (Modifiedfld <> '')then
+      work.Submit(Modifiedfld,modifiedVal,'c');
+    if (hide <> 'n/a')  then
+      work.Submit('hidden',ifthen((lowercase(hide) = 'yes'),'F','T'),'c');
+    if (readonly <> 'n/a') then
+      work.Submit('readonly',ifthen((lowercase(readonly) = 'yes'),'T','F'),'c');
+    work.Post;
+    if Modifiedfld = 'fldsql' then begin
+      stm := TStringStream.Create(modifiedVal);
+      work.WriteStream('fldSQl','axpflds',wc, stm);
+      stm.Free;
+    end;
+  Except on E:Exception Do
+    ErrMsg := E.Message;
+  End;
+  if ErrMsg <> '' then
+    axp.dbm.gf.DoDebug.msg('Error while updating AxpFlds table. '+ErrMsg);
+end;
+
+//Finding the xmlnode which is going to be changed and the type of property which is going to be changed
+Function TProfitEval.findChangeXmlNodeandcat(changeprop:String):String;
+begin
+  result := '';
+  if changeprop = 'caption' then result := xml_Caption+',field'
+  else if changeprop = 'expression' then result := xml_Expr+',field'
+  else if changeprop = 'validation' then result := xml_VExp+',field'
+  else if changeprop = 'sql' then result := xml_SQL+',field'
+  else if changeprop = 'source field in genmap' then result := xml_GMap+',genmap'
+  else if changeprop = 'source field in mdmap' then result := xml_DField+',mdmap'
+  else if changeprop = 'source field in fillgrid' then result := xml_FMap+',fillgrid';
+end;
+
+procedure TProfitEval.BulkFileWrite(Formatfile, TargetFile, Sql:String);
+var slist, trglist: TStringlist;
+    x:TXDS;
+    i,pcount,p,sp,ep,k:integer;
+    pname,pval,ptype,s,f,v,filetype,temp1:string;
+    fld1: pfld;
+begin
+    slist:=TStringList.create;
+    trglist:=TStringList.create;
+    BulkFileOutput:='';
+  try
+    if axp.dbm.gf.IsService then begin
+      temp1:=ExtractFileName(TargetFile);
+      if not DirectoryExists(axp.dbm.gf.StartPath) then CreateDir(axp.dbm.gf.StartPath);
+      targetfile:=axp.dbm.gf.StartPath+'\'+temp1;
+    end;
+
+    if formatfile<>'' then begin
+       filetype:=ExtractFileExt(Formatfile);
+       slist.loadfromfile(formatfile);
+       axp.dbm.gf.DoDebug.msg('Reading parameters from the source file');
+    end
+    else begin
+       axp.dbm.gf.DoDebug.msg('source file not found');
+       exit;
+    end;
+
+    x := Txds.create('x',nil,axp.dbm.Connection,axp.dbm.gf);
+    x.buffered:=true;
+    x.CDS.CommandText:=Sql;
+    pcount  :=  x.cds.Params.Count;
+    if not assigned(storedata) then begin
+      for p := 0 to pcount - 1 do begin
+          pname := x.CDS.Params[p].Name;
+          pval := GetVarValue(pname);
+          if LastVarType = '' then
+            ptype := 'c'
+          else
+            ptype := LastVarType;
+          x.AssignParam(i,pval,ptype);
+      end;
+    end
+    else begin
+      for p := 0 to pcount-1 do begin
+        fld1 := pfld(storedata.structdef.GetField(x.CDS.Params[p].Name));
+        if fld1=nil then begin
+            pname := x.CDS.Params[p].Name;
+            pval := GetVarValue(pname);
+            if LastVarType = '' then
+              ptype := 'c'
+            else
+              ptype := LastVarType;
+          x.AssignParam(p,pval,ptype)
+        end
+        else
+          x.AssignParam(p,storedata.GetFieldValue(x.CDS.Params[p].Name,1),fld1.DataType[1])
+      end;
+    end;
+
+      x.open;
+      axp.dbm.gf.DoDebug.msg('Executing Sql:');
+      axp.dbm.gf.DoDebug.msg(sql);
+      if targetfile<>''  then begin
+        while not x.cds.Eof do begin
+             i:=0;
+             while i<slist.count do begin
+                s:=slist[i];
+                sp := pos('{',s);
+                ep := pos('}',s);
+                if (ep<>0) and (sp<>0)  then begin
+                  f:=copy(s,sp+1, ep-sp-1);
+                  v:=vartostr(x.CDS.FieldValues[f]);
+                  delete(s, sp, ep-sp+1);
+                  insert(v, s, sp);
+                end;
+                trglist.Add(s);
+                inc(i);
+             end;
+          x.CDS.Next;
+        end;
+        if filetype<>'' then
+          trglist.SaveToFile(targetfile+filetype)
+        else
+          trglist.SaveToFile(targetfile+'.txt');
+        axp.dbm.gf.DoDebug.msg('File saved in :'+targetfile+filetype);
+        BulkFileOutput:=targetfile+filetype;
+      end
+      else begin
+         axp.dbm.gf.DoDebug.msg('Writing file for each Row in Sql');
+         while not x.cds.Eof do begin
+             i:=0;
+             while i<slist.count do begin
+                s:=slist[i];
+                sp := pos('{',s);
+                ep := pos('}',s);
+                if (ep<>0) and (sp<>0)  then begin
+                  f:=copy(s,sp+1, ep-sp-1);
+                  v:=vartostr(x.CDS.FieldValues[f]);
+                  delete(s, sp, ep-sp+1);
+                  insert(v, s, sp);
+                end;
+                trglist.Add(s);
+                inc(i);
+             end;
+              targetfile:=vartostr(x.CDS.FieldValues['filename']);
+              if axp.dbm.gf.IsService then begin
+                temp1:=ExtractFileName(TargetFile);
+                if not DirectoryExists(axp.dbm.gf.StartPath) then CreateDir(axp.dbm.gf.StartPath);
+                targetfile:=axp.dbm.gf.StartPath+'\'+temp1;
+              end;
+              if targetfile='' then
+                 axp.dbm.gf.DoDebug.msg('Target Filename not found :'+targetfile);
+              if targetfile<>'' then begin
+                if filetype<>'' then
+                  trglist.SaveToFile(targetfile+filetype)
+                else
+                  trglist.SaveToFile(targetfile+'.txt');
+                axp.dbm.gf.DoDebug.msg('File saved in :'+targetfile+filetype);
+                BulkFileOutput:=targetfile+filetype;
+              end;
+             trglist.Clear;
+           x.CDS.Next;
+         end;
+      end;
+  except on e:Exception do
+    begin
+        BulkFileOutput:='error'+e.message;
+      if assigned(axp) then begin
+        axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\BulkFileWrite - '+e.Message);
+        axp.dbm.gf.DoDebug.msg('Exception on file write :'+e.message);
+      end;
+    end;
+  end;
+
+  if assigned(trglist) then
+    freeandnil(trglist);
+   if assigned(slist) then
+    freeandnil(slist);
+end;
+
+Function TProfitEval.CreateWordDoc(strFile: String): Boolean;
+var wordapp:variant;
+Begin
+  if not fileexists(strfile) then begin
+    wordapp := CreateOleObject('word.application');
+    wordapp.visible := false;
+    wordapp.documents.Add;
+    WordApp.Activedocument.SaveAs(strfile);
+    WordApp.Activedocument.Close;
+    wordapp:=unassigned;
+  end;
+  ShellExecute(Application.Handle,'open', PChar(strfile), nil, nil, SW_SHOWNORMAL) ;
+End;
+
+{
+function TProfitEval.CreateDbf(SQLText,DirName,TName : String) : String;
+var
+  i : integer;
+  Axds : Txds;
+  tn1,pval,ptype,s , filename : String;
+begin
+  axp.dbm.gf.Dodebug.Msg('   Starting create dbf function');
+  result := 'false';
+  axp.dbm.gf.Dodebug.Msg('   Dir Name : ' + dirname);
+  if (not DirectoryExists(dirname)) or (dirname='') then begin
+    if not axp.dbm.gf.isservice then
+    begin
+      axp.dbm.gf.Dodebug.Msg('   << Directory not exists then table created in application path >>');
+      dirname := ExtractFilePath(Application.ExeName);
+    end ;
+  end;
+  if axp.dbm.gf.isservice then
+  begin
+    axp.dbm.gf.Dodebug.Msg('   << Directory not exists then table created in application path >>');
+   dirname :=  GetCurrentDir + '\Axpert\' + axp.dbm.gf.SessionId + '\' ;
+   axp.dbm.gf.Dodebug.Msg('   ' + dirname);
+  end;
+  Axds := TXds.Create('Axds',Nil,axp.dbm.Connection,axp.dbm.gf);
+  Axds.buffered := true;
+  Axds.CDS.CommandText := SQlText;
+  if Axds.CDS.Params.Count > 0 then
+  begin
+    for i := 0 to Axds.CDS.Params.Count-1 do
+    begin
+      pval := GetVarValue(Axds.CDS.Params[i].Name);
+      ptype := lastvartype;
+      Axds.AssignParam(i,pval,ptype);
+    end;
+  end;
+  Axds.open;
+  with dbtables.TTable.Create(nil) do // create a temporary TTable component
+  begin
+    try
+      axp.dbm.gf.Dodebug.Msg('   Creating Tables 1');
+      Active := False;
+      DatabaseName := DirName;
+      TableName := TName;
+      TableType := ttFoxPro;
+      // define fields for the new table
+      FieldDefs.Clear;
+      for i :=0 to Axds.CDS.fields.count-1 do begin
+        with FieldDefs.AddFieldDef do begin
+          Name := Axds.CDS.Fields[i].FieldName;
+          DataType := Axds.CDS.Fields[i].DataType;
+          if Axds.CDS.Fields[i].DataType = ftString then
+            Size := Axds.CDS.Fields[i].Size;
+          Required := False;
+        end;
+      end;
+      axp.dbm.gf.Dodebug.Msg('   Creating Tables 2');
+      CreateTable; // create the table
+    except on e:exception do
+    begin
+        axp.dbm.gf.Dodebug.Msg('   Error Message : ' + e.Message);
+        free;
+        Result :=  e.Message;
+        exit;
+    end;
+    end;
+  end;
+    axp.dbm.gf.Dodebug.Msg('   Creating Tables 3');
+  tn1 := dirname+tname;
+  tn1 := uppercase(FindAndReplace(tn1,':\\',':\'));
+  if pos('.DBF',tn1) = 0 then
+    tn1 := tn1+'.DBF';
+  axp.dbm.gf.Dodebug.Msg('   ' + tn1+' Created');
+  Result := tn1+' created';
+  try
+    table1 := TTable.Create(nil);
+    table1.DatabaseName := dirname;
+    table1.TableType := ttFoxPro;
+    table1.UpdateMode := upWhereAll;
+    table1.TableName:=TName;
+    table1.Active:=true;
+    while not Axds.CDS.Eof do begin
+      Table1.Append;
+      for i := 0 to Axds.CDS.Fields.Count-1 do begin
+        Table1.FieldbyName(Axds.CDS.Fields[i].FieldName).asString := Axds.CDS.fields[i].asString;
+      end;
+      Table1.Append;
+      Axds.CDS.Next;
+    end;
+    Table1.Close;
+    axp.dbm.gf.Dodebug.Msg('   ' + inttostr(Axds.CDS.RecordCount)+' rows(s) Created');
+  except on e:exception do
+  begin
+      axp.dbm.gf.Dodebug.Msg('   Error Message : ' + e.Message);
+      Axds.Free;
+      Table1.Free;
+      Result :=  e.Message;
+      exit;
+  end;
+  end;
+  Axds.Free;
+  Table1.Free;
+  Result := 'data updated';
+  if axp.dbm.gf.isservice then
+  begin
+     axp.dbm.gf.SessionId := '~'+ tn1 ;
+     axp.dbm.gf.Dodebug.Msg('   File Name :' + axp.dbm.gf.SessionId);
+  end;
+end;
+
+function TProfitEval.CreateFromDBf(DirName,TName : String) : String;
+var
+  i : integer;
+  Axds : Txds;
+  dbtype,sqlstring,fname,ftype,fwidth,fdec, dc : String;
+  Table1 : TTable;
+  dt : TFieldType;
+  C_TYPE,N_TYPE,D_TYPE : String;
+  ctype : String;
+begin
+  dirname := 'c:\';
+  tname := 'test';
+  if pos('.',tname)>0 then
+    tname := copy(tname,1,pos('.',tname)-1);
+  if not DirectoryExists(dirname) then begin
+    axp.dbm.gf.Dodebug.Msg('   Directory not exists.');
+    exit;
+  end;
+  if not FileExists(dirname+'\'+tname+'.dbf') then begin
+    axp.dbm.gf.Dodebug.Msg('   File not exists.');
+    exit;
+  end;
+  if axp.dbm.gf.remotelogin then
+    dbtype := lowercase(axp.dbm.gf.remotedbType)
+  else
+    dbtype := lowercase(axp.dbm.Connection.DbType);
+  if dbtype='oracle' then begin
+    C_TYPE := 'VARCHAR2';
+    N_TYPE := 'NUMBER';
+    D_TYPE := 'DATE';
+  end
+  else
+  begin
+    C_TYPE := 'VARCHAR';
+    N_TYPE := 'NUMERIC';
+    D_TYPE := 'DATETIME';
+  end;
+  try
+    Table1 := TTable.Create(nil);
+    Table1.DatabaseName := DirName;
+    Table1.TableName := TName;
+    Table1.TableType := ttFoxPro;
+    axp.dbm.gf.dodebug.Msg('   Creating table');
+    sqlstring := 'create table '+tname+'(';
+    Table1.Open;
+    for i := 0 to Table1.FieldCount-1 do begin
+      dt := Table1.Fields[i].DataType;
+      case dt of
+        ftBCD,ftSmallint,ftInteger,ftFloat,ftCurrency,ftLargeint : dc := 'n';
+        ftDate,ftTime, ftDateTime,ftTimeStamp : dc := 'd';
+        else dc := 'c';
+      end;
+      if dc = 'c' then
+      begin
+        fwidth := inttostr(Table1.Fields[i].Size);
+        sqlstring := sqlstring +Table1.Fields[i].FieldName +'  '+C_TYPE+'('+fwidth+')';
+      end else if dc='n' then
+      begin
+        fdec := inttostr(Table1.Fields[i].Size);
+        sqlstring := sqlstring +Table1.Fields[i].FieldName +'  '+N_TYPE+'(16,'+fdec+')';
+      end else if dc = 'd' then
+      begin
+        sqlstring := sqlstring +Table1.Fields[i].FieldName +'  '+D_TYPE;
+      end;
+      ctype := ctype+dc;
+      if i < Table1.FieldCount-1 then
+        sqlstring := sqlstring + ','
+      else
+        sqlstring := sqlstring + ')';
+    end;
+    Axds := axp.dbm.GetXDS(nil);
+    Axds.SqlText := sqlstring;
+    Axds.execsql;
+    Table1.First;
+    while not table1.Eof do begin
+      Axds.Append(tname);
+      for i := 0 to Table1.FieldCount -1 do begin
+        Axds.Submit(Table1.Fields[i].FieldName,Table1.Fields[i].AsString,copy(ctype,i+1,1));
+      end;
+      Axds.Post;
+      Table1.Next;
+    end;
+  except on E:Exception do
+    axp.dbm.gf.Dodebug.Msg('   ' + e.Message);
+  end;
+  if Assigned(Table1) then Table1.Free;
+  If Assigned(Axds) then Axds.Free;
+end;
+}
+
+procedure TProfitEVAL.AddToVarUsed(PFieldName: String);
+begin
+  if FromDev then begin
+    if varsused.IndexOf(lowercase(pFieldName)) = -1 then
+      varsused.Add(lowercase(pFieldName));
+  end;
+end;
+
+Function TProfitEval.GetAllValues(FName,Quoted:String;UniqueVal:String='f'):String;
+var i:integer;
+    s:String;
+begin
+ fname := trim(lowercase(fname));
+ quoted := trim(lowercase(quoted));
+ UniqueVal := trim(lowercase(UniqueVal));
+ result := '';
+ if FromDev then AddToVarUsed(FName);
+ if not assigned(storedata) then exit;
+ for i:=0 to storedata.fieldlist.count-1 do begin
+  if (pFieldRec(StoreData.fieldlist[i]).RowNo > -1) and (trim(lowercase(pFieldRec(StoreData.fieldlist[i]).Fieldname)) = fname) then begin
+    s := pFieldRec(StoreData.fieldlist[i]).value;
+    If s = '' Then continue;
+    if (UniqueVal = 'true') or (UniqueVal = 't') then
+    begin
+      if (quoted = 'true') or (quoted = 't') then
+      begin
+        if pos(',''' + s + ''',',',' +Result+ ',') > 0 then continue;
+      end
+      else
+      begin
+        if pos(',' + s + ',',',' +Result + ',') > 0 then continue;
+      end;
+    end;
+    if (quoted = 'true') or (quoted = 't') then
+      Result := Result + ',''' + s + ''''
+    else
+      Result := Result + ',' + s;
+  end;
+ end;
+ if result <> '' then begin
+   Result:=Trim(Result);
+   Delete(Result,1,1);
+   if (quoted = 'true') or (quoted = 't') then axp.dbm.gf.UsedQuotedStr := True;
+ end;
+end;
+
+function TProfitEVAL.GetDependency(PFieldName: String): String;
+var
+  tfld : pfld;
+  sExpr,sVar,s,vlist,plist : String;
+  j : integer;
+
+begin
+  Result := '';
+  if FromDev then AddToVarUsed(pFieldName);
+  if not assigned(storedata) then exit;
+  tfld := StoreData.structdef.GetField(pFieldName);
+  if tfld = nil then begin
+    axp.dbm.gf.Dodebug.Msg('   Invalid Fieldname.');
+    exit;
+  end;
+  sExpr := tfld.cexp;
+  Evaluate(sExpr);
+  sVar := Varsused.CommaText;
+  j :=1;
+  s := Trim(getnthstring(svar,j));
+  vlist := '';
+  plist := '';
+  while (s <> '') do begin
+    if (pos(s+',',vlist) = 0) then
+    begin
+      if (not axp.dbm.gf.IsSysVar(s)) and (lowercase(s) <> lowercase(pFieldName)) then begin
+        if (plist <> '') then begin
+            plist := plist+',';
+        end;
+        plist := plist+s;
+      end;
+      vlist := vlist+s+',';
+    end;
+    inc(j);
+    s := Trim(getnthstring(svar,j));
+  end;
+  result := plist;
+end;
+
+Function TProfitEval.GetSubTotal(DetFldName:String;ParentRowNo:Integer):Extended;
+begin
+  axp.dbm.gf.DoDebug.msg('   Executing GetSubTotal function');
+  Result := 0;
+ if FromDev then AddToVarUsed(DetFldName);
+  if assigned(ongetsubtotal) then
+    Result := OnGetSubTotal(DetFldName,ParentRowNo);
+end;
+
+Function TProfitEval.GetSubDelimitedStr(DetFldName,Delimiter,Quoted:String;ParentRowNo:Integer):String;
+begin
+  axp.dbm.gf.DoDebug.msg('   Executing GetSubDelimitedStr function');
+  Result := '';
+ if FromDev then AddToVarUsed(DetFldName);
+  if assigned(ongetsubdelimitedstr) then
+    Result := OnGetSubDelimitedStr(DetFldName,Delimiter,Quoted,ParentRowNo);
+end;
+
+function TProfitEval.RandomNo:String;
+var y,m,d,h,mn,s,ms:word;
+    nStr : String;
+begin
+  decodedatetime(now, y, m, d, h, mn, s, ms);
+  nStr:=leftpad(inttostr(axp.dbm.gf.siteno),Axp.dbm.gf.LenMaxSiteNo,'0')+inttostr(y)+leftpad(inttostr(m),2,'0')+leftpad(inttostr(d),2,'0');
+  nStr:=nStr+leftpad(inttostr(h),2,'0')+leftpad(inttostr(mn),2,'0');
+  nStr:=nStr+leftpad(inttostr(s),2,'0');
+  if lastRandomNo = nStr then nownum:=nownum+1 else nownum:=1;
+  lastRandomNo:=nStr;
+  result:=nStr+leftpad(inttostr(nownum),4,'0')+leftpad(inttostr(axp.dbm.gf.SesCount),4,'0');
+end;
+
+procedure TProfitEval.SaveImage(transid: String; fieldname: String; recordid: Extended; filename: String);
+var ixds : TXDS;
+    TblName,w,ImgExtn,FPath,FName,s : String;
+begin
+  axp.dbm.gf.DoDebug.msg('   Executing SaveImage Procedure');
+  ixds := axp.dbm.GetXDS(nil);
+  ixds.buffered := True;
+  TblName := Trim(transid)+Trim(FieldName);
+  w:='recordid='+floattostr(recordid);
+  try
+    try
+      ixds.CDS.CommandText:='select ftype from '+TblName+' where '+w;
+      ixds.open;
+      if not ixds.CDS.isempty then begin
+        ImgExtn := ixds.CDS.fieldbyname('ftype').AsString;
+        FPath := ExtractFilePath(FileName);
+        if ForceDirectories(FPath) then begin
+          FName := ExtractFileName(FileName);
+          s:=FPath+FName+'.'+ImgExtn;
+          axp.dbm.ReadBlob('img', TblName, w, s);
+          axp.dbm.gf.DoDebug.msg('     Image has been saved to '+s);
+        end else
+          axp.dbm.gf.DoDebug.msg('     Error in SaveImage. Filepath '''+FPath+''' does not exist.');
+      end;
+    Except
+      On E:Exception do begin
+        if assigned(axp) then begin
+          axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\SaveImage - '+e.Message);
+          axp.dbm.gf.DoDebug.msg('     Error in SaveImage. '+E.Message);
+        end;
+      end;
+    end;
+  finally
+    ixds.close; ixds.Free; ixds := nil;
+  end;
+end;
+
+function TProfitEval.WithTransaction(Transid:String;Recordid:Extended) : String;
+begin
+  axp.dbm.gf.Dodebug.Msg('   Executing WithTransaction.');
+  result := '';
+  if assigned(OnLoadTrans) then
+    result := OnLoadTrans(Transid,Recordid);
+end;
+
+function TProfitEval.EndWith:String;
+begin
+  axp.dbm.gf.Dodebug.Msg('   Executing EndWith.');
+  result := '';
+  if assigned(OnEndTrans) then
+    result := OnEndTrans;
+end;
+
+procedure TProfitEval.SQLReSave(SQLText:String);
+var RetStr:String;
+begin
+  if (not assigned(axp.dbm)) or (not assigned(OnLoadAndSave)) then exit;
+  axp.dbm.gf.DoDebug.msg('   Executing SQlReSave Procedure');
+  work := axp.dbm.GetXDS(work);
+  work.buffered := True;
+  work.CDS.CommandText := sqltext;
+  ReplaceParams(work);
+  work.open;
+  if not work.CDS.IsEmpty then begin
+    if (assigned(work.cds.findfield('transid'))) and (assigned(work.cds.findfield('recordid'))) then begin
+      work.CDS.first;
+      while not work.cds.eof do begin
+        RetStr := OnLoadAndSave(work.cds.FieldByName('transid').AsString,work.CDS.FieldByName('recordid').AsString);
+        if RetStr <> '' then begin
+          axp.dbm.gf.DoDebug.msg('    Error is resaving. Transid='+work.cds.FieldByName('transid').AsString+' recordid='+work.cds.FieldByName('recordid').AsString);
+          axp.dbm.gf.DoDebug.msg('    '+RetStr);
+        end;
+        work.cds.next;
+      end;
+    end;
+  end;
+  work.close;
+  work.Free;
+  work := nil;
+end;
+
+Procedure TProfitEval.FetchData(FldName:String);
+var fld : pFld;
+begin
+  if not assigned(storedata) then exit;
+  fld:=storedata.structdef.GetField(FldName);
+  if not assigned(fld) then exit;
+  if (fld.ModeofEntry='select') then begin
+    if not fld.FromList then begin
+      if assigned(fld.QSelect.CDS) then begin
+        fld.QSelect.CDS.Close;
+        fld.QSelect.buffered := true;
+        fld.QSelect.open;
+      end;
+    end;
+  end;
+end;
+
+procedure TProfitEval.DoWriteToFile(Formatfile, TargetFile, Instructions:String);
+var slist, fnames, trglist : TStringlist;
+    f, frms, s, x, v:String;
+    bk:TBookMark;
+    i, fno, j, c, r, sp, ep : integer;
+    fld:pfld;
+begin
+  slist:=TStringList.create;
+  fnames:=TStringList.create;
+  trglist:=TStringList.create;
+  if axp.dbm.gf.IsService then
+  begin
+     formatfile := ExtractFileName(formatfile);
+     axp.dbm.gf.Dodebug.Msg('Format File Name : ' + formatfile);
+     slist.loadfromfile(formatfile);
+  end else slist.loadfromfile(formatfile);
+  i:=0;
+  frms:='';
+  //loop on every row
+  while i<slist.count do begin
+    s:=slist[i];
+
+    //loop for every field
+    while true do begin
+      sp := pos('{',s);
+      if sp=0 then break;
+      ep := pos('}',s);
+      if ep=0 then break;
+      f:=copy(s,sp+1, ep-sp-1);
+
+      if not assigned(storedata) then begin
+        v := GetVarValue(f);
+        delete(s, sp, ep-sp+1);
+        insert(v, s, sp);
+      end else begin
+        //Copy grid line
+        fld:=storedata.structdef.GetField(f);
+        if not assigned(fld) then begin
+          delete(s, sp, ep-sp+1);
+          continue;
+        end;
+
+{        if fld.AsGrid then begin
+          fno := fld.FrameNo;
+          if pos(','+inttostr(fno)+',', frms) = 0 then begin
+            c := storedata.GetRowCount(fno);
+            for j:=1 to c-1 do
+              slist.Insert(i,s);
+            frms := frms+','+inttostr(fno)+',';
+          end;
+        end;
+}
+        //Find rowno
+        fnames.add(f);
+        r:=0;
+        for j:=0 to fnames.count-1 do
+          if fnames[j]=f then inc(r);
+
+        v := storedata.GetFieldValue(f, r);
+        delete(s, sp, ep-sp+1);
+        insert(v, s, sp);
+      end;
+    end;
+    trglist.Add(s);
+    inc(i);
+  end;
+  if axp.dbm.gf.IsService then
+  begin
+     targetfile := ExtractFileName(targetfile);
+     FilesGeneratedByFunctions := FilesGeneratedByFunctions + targetfile + ',';
+     targetfile := axp.dbm.gf.startpath+'\'+targetfile ;
+     axp.dbm.gf.Dodebug.Msg('Target File Name : ' + targetfile);
+     if not DirectoryExists(axp.dbm.gf.StartPath) then CreateDir(axp.dbm.gf.StartPath);
+     trglist.SaveToFile(targetfile);
+  end else trglist.SaveToFile(targetfile);
+  slist.Clear;
+  FreeAndNil(slist);
+  fnames.Clear;
+  FreeAndNil(fnames);
+  trglist.Clear;
+  FreeAndNil(trglist);
+end;
+
+Function TProfitEval.GetSourceImage(Transid: string; ImgFldName: string; Recid: Extended):String;
+begin
+  if FromDev then AddToVarUsed(ImgFldName);
+  if Trim(GetVarValue('AxpImagePath')) = '' then
+    result := Transid+ImgFldName+','+Trim(FloatToStr(Recid))
+  else
+    result := Transid+'\'+ImgFldName+','+Trim(FloatToStr(Recid));
+end;
+
+Function TProfitEval.CreateIview(ivName,ivCap,sqltext,paramtext:String):String;
+begin
+  result := '';
+  if assigned(OnCreateIview) then begin
+    result := OnCreateIview(ivName,ivCap,sqltext,paramtext);
+    if result <> '' then
+      raise Exception.Create(result);
+  end;
+end;
+
+Function TProfitEval.SaveIview(ivname,defaultPage : String):String;
+begin
+  result := '';
+  if assigned(OnSaveIview) then begin
+    result := OnSaveIview(ivname,defaultPage);
+    if result <> '' then
+      raise Exception.Create(result);
+  end;
+end;
+
+Function TProfitEval.DeleteIview(ivName:String):String;
+begin
+  result := '';
+  if assigned(OnDeleteIview) then begin
+    result := OnDeleteIview(ivName);
+    if result <> '' then
+      raise Exception.Create(result);
+  end;
+end;
+
+
+function TProfitEval.ExecuteAPI(ReqId,UrlStr,ServiceName,ServiceMethod,
+    ParamStr,HeaderStr,ReqStr:String;ScrptName:String='';BodyParamStr:String='';
+    AuthStr:String=''):String;
+var
+  emsg,status : string;
+  StrStream,ResStream : TStringStream;
+  ResStr, sl : TStringList;
+  ReqidFound : Boolean;
+  BodyReqStr : String;
+begin
+  axp.dbm.gf.DoDebug.msg('ExecuteAPI started');
+
+  Result := '';
+  ServiceMethod := lowercase(ServiceMethod);
+  StrStream := nil;
+  ResStream := nil;
+  ResStr := nil;
+  sl := nil;
+  try
+    try
+//      if ( not CheckAPIRequest(Reqid)) then
+//        raise Exception.Create('Duplicate requestid '+reqid);
+      CreateHttpComps(HeaderStr,AuthStr);
+      StoreAPIDetails(Reqid,urlstr,servicename,servicemethod,paramstr,headerstr,reqstr,ScrptName,BodyParamStr,AuthStr);
+     if ServiceMethod = 'get' then begin
+       StrStream := TStringStream.Create;
+       ResStr := TStringList.Create;
+       if ParamStr <> '' then
+         UrlStr := UrlStr+'?'+TIdURI.ParamsEncode(Paramstr);
+       IdHTTPObj.Get(UrlStr,StrStream);
+       StrStream.Position := 0;
+       ResStr.LoadFromStream(StrStream);
+       result := ResStr.Text;
+     end else begin
+       if ReqStr <> '' then
+       begin
+         StrStream := TStringStream.Create(ReqStr, TEncoding.UTF8);
+         StrStream.Position := 0;
+	     end;
+       if ParamStr <> '' then
+         UrlStr := UrlStr+'?'+TIdURI.ParamsEncode(Paramstr);
+//         UrlStr := UrlStr+'?'+Paramstr;
+       if BodyParamStr <> '' then begin
+         BodyReqStr := GetBodyReqStr(BodyParamStr);
+         StrStream := TStringStream.Create(BodyReqStr, TEncoding.UTF8);
+         StrStream.Position := 0;
+       end;
+       if ServiceMethod = 'put' then
+         Result := IdHTTPObj.Put(UrlStr,StrStream)
+       else if ServiceMethod = 'patch' then begin
+         ResStream := TStringStream.Create;
+         TIdHTTPAccess(IdHTTPObj).DoRequest('PATCH', UrlStr, StrStream, ResStream,[]);
+         result := ResStream.DataString;
+       end else
+         Result := IdHTTPObj.Post(UrlStr,StrStream);
+     end;
+     status := 'Success';
+    except on e:Exception do
+      emsg := e.Message;
+    end;
+  finally
+    if Assigned(StrStream) then FreeAndNil(StrStream);
+    if Assigned(ResStream) then FreeAndNil(ResStream);
+    if Assigned(ResStr) then FreeAndNil(ResStr);
+    if Assigned(sl) then FreeAndNil(sl);
+    if Assigned(IdHTTPObj.Request.Authentication) then begin
+      IdHTTPObj.Request.Authentication.Destroy;
+      IdHTTPObj.Request.Authentication := nil;
+    end;
+    if Assigned(IdHTTPObj) then FreeAndNil(IdHTTPObj);
+    if Assigned(LHandler) then FreeAndNil(LHandler);
+  end;
+  if emsg <> '' then begin
+    if emsg = '{HTTP/1.1 400 Bad Request}' then
+      emsg := '{Invalid request}';
+    result := emsg;
+    status := 'Fail';
+  end;
+  UpdateResponse(Reqid,Result,status);
+  axp.dbm.gf.DoDebug.msg('ExecuteAPI completed');
+end;
+
+
+function TProfitEval.GetBodyReqStr(sBReqStr:String):String;
+var sl : TStringList;
+    i : integer;
+    pn,pv : String;
+begin
+  result := '';
+  sl := TStringList.Create;
+  sl.Delimiter := ',';
+  sl.DelimitedText := sBReqStr;
+  IdHTTPObj.Request.BasicAuthentication:= True;
+  for i := 0 to sl.Count-1 do begin
+    pn := lowercase(sl.Names[i]);
+    pv := sl.ValueFromIndex[i];
+    if pn = 'contenttype' then
+      IdHTTPObj.Request.ContentType := pv
+//    else if pn = 'username' then begin
+//      IdHTTPObj.Request.Username := pv;
+//      IdHTTPObj.Request.BasicAuthentication:= True;
+//    end
+//    else if pn = 'password' then
+//      IdHTTPObj.Request.Password := pv
+    else
+      result := result+'&'+sl[i];
+  end;
+  Delete(result,1,1);
+  FreeAndNil(sl);
+end;
+
+procedure TProfitEval.CreateHttpComps(Hstr,AuthStr:String);
+var idHeaderList : TStringList;
+    i : integer;
+    sRequestTimeout : String;
+begin
+  axp.dbm.gf.DoDebug.msg('Creating HTTP component');
+  IdHTTPObj := TIdHttp.Create();
+  LHandler := TIdSSLIOHandlerSocketOpenSSL.Create();
+  LHandler.SSLOptions.Method := sslvTLSv1_2;
+  LHandler.SSLOptions.SSLVersions := [sslvTLSv1_2];
+  //To handle redirects
+  IdHTTPObj.HandleRedirects := True; //it starts automatically handling redirects
+  IdHTTPObj.RedirectMaximum := 15; //is used to set how many successive redirects should be handled
+  IdHTTPObj.IOHandler := LHandler;
+  IdHTTPObj.HTTPOptions := [hoForceEncodeParams];
+  IdHTTPObj.ProtocolVersion := pv1_1;
+  IdHTTPObj.Request.CharSet := 'utf-8';
+  IdHTTPObj.Request.CacheControl := 'no-cache'; // this force use no-cache
+  IdHTTPObj.Request.Accept := '*/*';
+  sRequestTimeout := GetVarValue('Axp_RequestTimeOut');
+  if sRequestTimeout <> '' then begin
+    IdHTTPObj.IOHandler.ReadTimeout := StrToInt(sRequestTimeout);
+    IdHTTPObj.IOHandler.ConnectTimeout := StrToInt(sRequestTimeout);
+    IdHTTPObj.ReadTimeout := StrToInt(sRequestTimeout);
+    IdHttpObj.ConnectTimeout := StrToInt(sRequestTimeout);
+  end;
+  //IdHTTPObj.Request.ContentType := 'application/json';
+
+  if Trim(AuthStr) <> '' then begin
+    SetAuthDetails(AuthStr);
+  end;
+
+  if HStr <> '' then begin
+    IdHeaderList := TStringList.Create;
+    IdHeaderList.Delimiter := ',';
+    IdHeaderList.StrictDelimiter := True;
+    IdHeaderList.DelimitedText := Hstr;
+    IdHTTPObj.Request.CustomHeaders.Delimiter := ';';
+    for i := 0 to IdHeaderList.Count-1 do begin
+      if lowercase(IdHeaderList.Names[i]) = 'contenttype' then
+        IdHTTPObj.Request.CustomHeaders.AddValue('Content-Type',IdHeaderList.ValueFromIndex[i])
+      else if lowercase(IdHeaderList.Names[i]) = 'accept' then
+        IdHTTPObj.Request.Accept := IdHeaderList.ValueFromIndex[i]
+      else
+        IdHTTPObj.Request.CustomHeaders.Add(IdHeaderList.Names[i]+':'+IdHeaderList.ValueFromIndex[i]);
+    end;
+    if IdHTTPObj.Request.CustomHeaders.IndexOfName('Content-Type') < 0 then
+      IdHTTPObj.Request.CustomHeaders.AddValue('Content-Type','application/json');
+    FreeAndNil(IdHeaderList);
+  end else begin
+    IdHTTPObj.Request.CustomHeaders.Delimiter := ';';
+    IdHTTPObj.Request.CustomHeaders.AddValue('Content-Type','application/json');
+  end;
+  IdHTTPObj.Request.UserAgent := 'Axpert';
+  axp.dbm.gf.DoDebug.msg('Http component created');
+end;
+
+procedure TProfitEval.SetAuthDetails(AuthStr:String);
+var AuthList : TStringList;
+    idx : Integer;
+    v : String;
+begin
+  axp.dbm.gf.DoDebug.msg('Setting authorization properties');
+  AuthList := nil;
+  Try
+    AuthList := TStringList.Create;
+    AuthList.Delimiter := ',';
+    AuthList.StrictDelimiter := True;
+    AuthList.DelimitedText := AuthStr;
+    idx := AuthList.IndexOfName('Type');
+    if idx >= 0 then begin
+      v := lowercase(Trim(AuthList.ValueFromIndex[idx]));
+      if v = 'basic auth' then begin
+        axp.dbm.gf.DoDebug.msg('Authorization type-'+v);
+        IdHTTPObj.Request.BasicAuthentication := True;
+        IdHTTPObj.Request.Authentication := TIdBasicAuthentication.Create;
+        IdHTTPObj.Request.Authentication.Username := AuthList.Values['username'];
+        IdHTTPObj.Request.Authentication.Password := AuthList.Values['password'];
+      end;
+    end;
+  Finally
+    if assigned(Authlist) then FreeAndNil(AuthList);
+  End;
+  axp.dbm.gf.DoDebug.msg('Setting authorization properties completed');
+end;
+
+procedure TProfitEval.StoreAPIDetails(ReqId,UrlStr,ServiceName,ServiceMethod,
+    ParamStr,HeaderStr,ReqStr,ScrptName,BodyParamStr,AuthStr:String);
+var  s : String;
+begin
+  try
+    axds.close;
+    axds.Append('AxAPIJobDetails');
+  //  axds.Submit('axapijobsid',FloatToStr(Axp.dbm.Gen_id(axp.dbm.connection)),'n');
+    axds.Submit('jobid',Reqid,'c');
+    s:=datetimetostr(axp.dbm.getserverdatetime);
+    axds.Submit('starttime',s,'d');
+    axds.Submit('requestid',Reqid,'c');
+    {if ForAxScript then
+      s := Axp.dbm.gf.d_sessionid
+    else }
+      s := Axp.dbm.gf.SessionId;
+    axds.Submit('Sessionid',s,'c');
+    axds.Submit('username',Axp.dbm.gf.username,'c');
+    {if ForAxScript then
+      s:= 'Job'
+    else} s := 'Web';
+    axds.Submit('context',s,'c');
+    axds.Submit('Act_Script_Name',ScrptName,'c');
+    axds.Submit('url',UrlStr,'c');
+    axds.Submit('ServiceName',ServiceName,'c');
+    axds.Submit('Method',ServiceMethod,'c');
+    axds.Submit('Params',ParamStr,'c');
+    axds.Submit('BParams',BodyParamStr,'c');
+    axds.Submit('Header',HeaderStr,'c');
+    axds.Submit('Requeststr',ReqStr,'c');
+    axds.Submit('AuthStr',AuthStr,'c');
+    {
+    if SchJobid <> '' then
+      axds.Submit('SchJobid',SchJobid,'c');
+    }
+    axds.Post;
+  except on e:Exception do
+    begin
+      if assigned(axp) then  axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\StoreAPIDetails - '+e.Message);
+      if assigned(axp) then  axp.dbm.gf.DoDebug.msg(e.Message);
+    end;
+  end;
+end;
+
+procedure TProfitEval.UpdateResponse(Reqid,RespStr,status:String);
+var s : String;
+begin
+  try
+    axds.close;
+    axds.Edit('AxAPIJobDetails','requestid='+quotedstr(Reqid));
+    axds.Submit('responsestr',RespStr,'c');
+    axds.Submit('status',Status,'c');
+    s:=datetimetostr(axp.dbm.getserverdatetime);
+    axds.Submit('endtime',s,'d');
+    axds.Post;
+  except on e:Exception do
+    begin
+      if assigned(axp) then  axp.dbm.gf.DoDebug.Log(axp.dbm.gf.Axp_logstr+'\uProfitEval\UpdateResponse - '+e.Message);
+      if assigned(axp) then  axp.dbm.gf.DoDebug.msg(e.Message);
+    end;
+  end;
+end;
+
+//DesignFastReport | For FastPrint
+function TProfitEVAL.DesignFastReport(pFormName,pSourceTemplateName,pTargetTemplateName:String):String;
+var
+  AxfastRun : TAxfastRun;
+begin
+  try
+    result := '';
+    AxfastRun := nil;
+    try
+      axp.dbm.gf.Dodebug.Msg('Executing DesignFastReport.');
+
+      if copy(pFormName,1,1) = ':' then
+      begin
+        delete(pFormName,1,1);
+        pFormName := GetVarValue(pFormName);
+      end;
+      if copy(pSourceTemplateName,1,1) = ':' then
+      begin
+        delete(pSourceTemplateName,1,1);
+        pSourceTemplateName := GetVarValue(pSourceTemplateName);
+      end;
+      if copy(pTargetTemplateName,1,1) = ':' then
+      begin
+        delete(pTargetTemplateName,1,1);
+        pTargetTemplateName := GetVarValue(pTargetTemplateName);
+      end;
+
+      AxfastRun := TAxfastRun.create(axp);
+      AxfastRun.parser := Self;
+      AxfastRun.DesignFastReport(pFormName,pSourceTemplateName,pTargetTemplateName);
+
+      result := pTargetTemplateName+' template created.';
+      axp.dbm.gf.Dodebug.Msg('DesignFastReport ends.');
+    Except on E:Exception do
+    begin
+      result := E.Message;
+      axp.dbm.gf.Dodebug.Msg('Error in DesignFastReport '+result);
+    end;
+    end;
+  finally
+    if Assigned(AxfastRun) then
+      FreeAndNil(AxfastRun);
+  end;
+end;
+
+
+end.
+

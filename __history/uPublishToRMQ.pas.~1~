@@ -1,0 +1,1188 @@
+unit uPublishToRMQ;
+{Copied from \Axpert9-XE3\Ver 11.2}
+{ PublishToRMQ unit }
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Graphics, Controls, Forms, db,
+  Dialogs, Grids, ExtCtrls, StdCtrls, ComCtrls, Clipbrd, dateutils, XMLDoc,
+  XMLIntf, System.Math,
+  StrUtils, uStructDef, uXDS, uParse,
+  // Delphi XE3 has a DBXJson object for JSON support but above that version (>XE3) DBXJson is deprecated and JSON object is used.
+{$IF CompilerVersion > 24.0}
+  JSON
+{$ELSE}
+  DBXJson
+{$IFEND}
+;
+
+type
+  TSDEvaluateExpr = function(sExpression: String): String of object;
+
+  TPublishToRMQ = class
+  private
+    sRecordId: String;
+
+    {jsonPayloadRequest,} jsonInnerObject,jsonPayloadRequestCopy: TJSONObject;
+
+    sProcessTable,sEscalaitonTable,sReminderTable : String;
+
+    function GetRMQAPIURL: String;
+    function GetDaysInMilliSeconds(iDays, iHours, iMinutes: Integer): Integer;
+    function GetDataSet(pSQLText: String): TXDS;
+    function PrepareReminderDetails: String;
+    function GetRecID: String;
+    procedure PrepareScriptsRequestPayload;
+    function PrepareEscalationDetails: String;
+    function GetScriptsAPIURL: String;
+    //procedure PushMessageToRMQ(sScriptAPIPayload,
+      //sDelayedMessageTimeInMs: String);
+    function GetValue(sInpFieldorExp: String;
+      bEvaluate: Boolean = False): String;
+    procedure SetPEGTables;
+    function PrepareNotificationDetails: String;
+    function AxPEGGetElapsedDaysinMS(iDays, iHours, iMinutes: Integer): Integer;
+    function GetTransInitDateTime: String;
+    function ConvertTimestampToDateTime(const timestamp: string): string;
+
+  public
+    jsonPayloadRequest : TJSONObject;
+    structdef: TStructDef;
+    Parser: TEval;
+    SDEvaluateExpr: TSDEvaluateExpr;
+
+    sTaskId, sTransId, sProcessName, sTaskName, sKeyField, sKeyValue: String;
+    sAxApp, sUserName, sScriptName, sStructType, sTrace: String;
+    sNotifyTemplate, sNotifyQueueName: String;
+    sServiceName, sRMQ_APIURL, sScripts_APIURL : String;
+
+    bRemind, bEscalate, bNotification, bUseBusinessdateLogic,
+    bScriptJobs,bIsPEGV2,bIsTaskNotification : Boolean;
+
+    constructor create(pStructDef: TStructDef); virtual;
+    destructor destroy; override;
+
+    procedure PushMessageToRMQ(sScriptAPIPayload,
+      sDelayedMessageTimeInMs: String);
+    function PublishMessage: String;
+
+  end;
+
+implementation
+
+uses uProfitEVAL;
+
+var
+  ProfitEVAL: TProfitEVAL;
+
+  // Create
+constructor TPublishToRMQ.create(pStructDef: TStructDef);
+begin
+  // create
+  structdef := pStructDef;
+  ProfitEVAL := nil;
+  ProfitEVAL := TProfitEVAL.create(structdef.axprovider);
+  SDEvaluateExpr := nil;
+
+  jsonPayloadRequest := Nil;
+  jsonPayloadRequestCopy := Nil;
+  jsonPayloadRequest := TJSONObject.create;
+
+  jsonInnerObject := Nil;
+  jsonInnerObject := TJSONObject.create;
+
+  sServiceName := '';
+
+  sRMQ_APIURL := '';
+  sTaskId := '';
+  sTransId := '';
+  sProcessName := '';
+  sTaskName := '';
+  sKeyValue := '';
+  sNotifyTemplate := '';
+  sNotifyQueueName := '';
+
+  sAxApp := '';
+  sUserName := '';
+  sScriptName := '';
+  sStructType := '';
+  sTrace := '';
+
+  sProcessTable := '';
+  sEscalaitonTable := '';
+  sReminderTable := '';
+
+  bRemind := False;
+  bEscalate := False;
+  bNotification := False;
+  bUseBusinessdateLogic := False;
+  bScriptJobs := False;
+  bIsPEGV2 := False;
+  bIsTaskNotification := False;
+end;
+
+// Destroy
+destructor TPublishToRMQ.destroy;
+begin
+  // Destroy
+  if Assigned(ProfitEVAL) then
+    FreeAndNil(ProfitEVAL);
+  jsonPayloadRequest := nil;
+  jsonPayloadRequestCopy := nil;
+  jsonInnerObject := nil;
+  (*
+  if Assigned(jsonPayloadRequest) then
+    FreeAndNil(jsonPayloadRequest);
+  if Assigned(jsonInnerObject) then
+    FreeAndNil(jsonInnerObject);
+  *)
+  inherited;
+end;
+
+// GetValue
+Function TPublishToRMQ.GetValue(sInpFieldorExp: String;
+  bEvaluate: Boolean = False): String;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg('GetValue starts...');
+  Result := '';
+  try
+    structdef.axprovider.dbm.gf.DoDebug.msg('GetValue Input : ' +
+      sInpFieldorExp);
+    if Assigned(Parser) then
+    begin
+      if bEvaluate then
+      begin
+        Parser.Evaluate(sInpFieldorExp);
+        Result := Parser.Value;
+      end
+      else
+      begin
+        Result := Parser.GetVarValue(sInpFieldorExp);
+      end;
+      structdef.axprovider.dbm.gf.DoDebug.msg('Result ' + Trim(Result));
+      //structdef.axprovider.dbm.gf.DoDebug.msg('Result from parser ' + Result);
+    end
+    else if Assigned(SDEvaluateExpr) then
+    begin
+      Result := SDEvaluateExpr(sInpFieldorExp);
+    end
+    else
+      structdef.axprovider.dbm.gf.DoDebug.msg
+        ('TPublishToRMQ/parser and SDEvaluateExpr is not assigned.');
+  Except
+    on E: Exception do
+      structdef.axprovider.dbm.gf.DoDebug.msg('TPublishToRMQ/Error in GetValue '
+        + E.Message);
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('GetValue ends.');
+end;
+
+// GetRMQAPIURL | Function to get RMQ API URL (reads from global variable)
+function TPublishToRMQ.GetRMQAPIURL: String;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/GetRMQAPIURL starts...');
+  //if Assigned(SDEvaluateExpr { Parser } ) then
+    //sRMQ_APIURL := SDEvaluateExpr('AxRMQAPIURL');
+  sRMQ_APIURL := GetValue('AxRMQAPIURL');
+  // Parser.GetVarValue('AxRMQAPIURL');
+  structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/GetRMQAPIURL ends.');
+end;
+
+// GetScriptsAPIURL | Function to get SCRIPTS API URL (reads from global variable)
+function TPublishToRMQ.GetScriptsAPIURL: String;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/GetScriptsAPIURL starts...');
+  //if Assigned(SDEvaluateExpr { Parser } ) then
+    //sScripts_APIURL := SDEvaluateExpr('AxScriptsAPIURL');
+  sScripts_APIURL := GetValue('AxScriptsAPIURL');
+  // Parser.GetVarValue('AxScriptsAPIURL');
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/GetScriptsAPIURL ends.');
+end;
+
+//AxPEGGetElapsedDaysinMS
+Function TPublishToRMQ.AxPEGGetElapsedDaysinMS(iDays, iHours,
+  iMinutes: Integer):Integer;
+var
+  PEGGetBusinessDate_XDS : TXDS;
+  sCurrentDateTime,sElapsedDateTime, sSQLText : String;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/AxPEGGetElapsedDaysinMS starts...');
+  try
+    result := 0;
+    PEGGetBusinessDate_XDS := nil;
+    //DB wise may need to be handled
+    sCurrentDateTime := datetimetostr(structdef.axprovider.dbm.getserverdatetime);
+    if (structdef.axprovider.dbm.Connection.DbType = 'oracle') then
+      sSQLText := 'Select '+
+      'AxPEGGetBusinessDate('+QuotedStr(sTaskId)+','+QuotedStr(sCurrentDateTime)+','+
+      InttoStr(iDays)+','+InttoStr(iHours)+','+InttoStr(iMinutes)+') as NotifyDate from dual'
+    else
+      sSQLText := 'Select '+
+      'AxPEGGetBusinessDate('+QuotedStr(sTaskId)+','+QuotedStr(sCurrentDateTime)+','+
+      InttoStr(iDays)+','+InttoStr(iHours)+','+InttoStr(iMinutes)+') as NotifyDate';
+    PEGGetBusinessDate_XDS := GetDataSet(sSQLText);
+    if Assigned(PEGGetBusinessDate_XDS)
+       and (PEGGetBusinessDate_XDS.CDS.RecordCount > 0) then
+    begin
+      sElapsedDateTime := datetimetostr(PEGGetBusinessDate_XDS.CDS.FieldByName('NotifyDate').AsDateTime);
+      Result := MilliSecondsBetween(StrToDateTime(sCurrentDateTime),StrToDateTime(sElapsedDateTime));
+    end;
+  finally
+    if Assigned(PEGGetBusinessDate_XDS) then
+      FreeAndNil(PEGGetBusinessDate_XDS);
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/AxPEGGetElapsedDaysinMS ends.');
+end;
+
+
+// GetDaysInMilliSeconds(Day,Hr,Min)  | Function to get DelayTime in MilliSeconds
+function TPublishToRMQ.GetDaysInMilliSeconds(iDays, iHours,
+  iMinutes: Integer): Integer;
+var
+  iDaysToMinutes, iHourstoMinutes, iTotalMinutes, iDaysInMilliSecods: Integer;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/GetDaysInMilliSeconds starts...');
+  Result := 0;
+  if bUseBusinessdateLogic then
+  begin
+    (*
+    Call DB function AxPEGGetBusinessDate to get Target Date
+    The function takes DateTime, Days, Hours, and Minutes as input
+    and returns the Target DateTime.  
+    *)
+    iDaysInMilliSecods := AxPEGGetElapsedDaysinMS(iDays,iHours,iMinutes);
+  end
+  else
+  begin
+    // Days to Minutes Conversion | 1 day = 1440 min
+    iDaysToMinutes := iDays * 1140;
+    // Hours to Minutes Conversion  | 1 hr = 60 min
+    iHourstoMinutes := iHours * 60;
+    // Total minutes
+    iTotalMinutes := iDaysToMinutes + iHourstoMinutes + iMinutes;
+    // Minutes to Milliseconds Conversion (min to ms) | 1 min = 60000 ms
+    iDaysInMilliSecods := iTotalMinutes * 60000;
+  end;
+  Result := iDaysInMilliSecods;
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/GetDaysInMilliSeconds ends.');
+end;
+
+//EscapeCRLF
+function EscapeCRLF(const Input: string): string;
+begin
+  // Replace CR LF with \r\n
+  //Result := StringReplace(Input, #13#10, '\r\n', [rfReplaceAll]);
+
+  //Looks ckeditor adds html tag  <br/> also newline (we handled html tags in report and mails)
+  //So replaced new line char with empty string
+  Result := StringReplace(Input, #13#10, '', [rfReplaceAll]);
+end;
+
+
+//EscapeSpecialChars
+function EscapeSpecialChars(const Input: string): string;
+begin
+  (*
+  Handling '\' character, if required it has to be handled for other
+  characters as well.
+  *)
+  Result := Input;
+  if AnsiContainsStr(Result,'\') then
+    Result := ReplaceStr(Result,'\','\\');
+  //handling " not required when escaping json string, its only required when
+  //escaping normal text string, since json string has " for key values.
+  (*
+  if AnsiContainsStr(Result,'"') then
+    Result := ReplaceStr(Result,'"','\"');
+  *)
+  Result := EscapeCRLF(Result);
+end;
+
+
+// PushMessageToRMQ
+{Looks sScriptAPIPayload param not used}
+Procedure TPublishToRMQ.PushMessageToRMQ(sScriptAPIPayload,
+  sDelayedMessageTimeInMs: String);
+var
+  sUniqueId, sService, sMethod, sParamstr, sHeaderstr, sReqstr: String;
+  jsonPushToQueue_ReqPayload: TJSONObject;
+  sServiceResult: String;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg('PushMessageToRMQ starts...');
+  try
+    jsonPushToQueue_ReqPayload := nil;
+
+    sServiceResult := '';
+    try
+      jsonPushToQueue_ReqPayload := TJSONObject.create();
+
+      sUniqueId := structdef.axprovider.dbm.gf.GetDateTimeStampString +
+        structdef.axprovider.dbm.gf.LeftPad(InttoStr(Random(999)), 3, '0');
+      // sRMQ_APIURL
+      sService := 'PushToRMQ';
+      sMethod := 'POST';
+      sParamstr := '';
+      sHeaderstr := 'accept=*/*,Content-Type=application/json';
+
+      sReqstr := jsonPayloadRequest.ToString;
+      // reset json object
+      // if Assigned(jsonPayloadRequest) then
+      // FreeAndNil(jsonPayloadRequest);
+      jsonPayloadRequest := nil;
+      jsonPayloadRequest := TJSONObject.create();
+
+      if sScripts_APIURL = '' then
+        sScripts_APIURL :=
+          'http://localhost/axpertthinclient/ASBScriptRest.dll/datasnap/rest/TASBScriptRest/scriptsapi';
+      jsonPayloadRequest.AddPair(TJSONPair.create('url', sScripts_APIURL));
+      jsonPayloadRequest.AddPair(TJSONPair.create('method', 'POST'));
+      sReqstr := EscapeSpecialChars(sReqstr);
+      jsonPayloadRequest.AddPair('payload', TJSONObject.ParseJSONValue(sReqstr)
+        { sReqstr } );
+      jsonPayloadRequest.AddPair(TJSONPair.create('trace', sTrace));
+
+      sReqstr := jsonPayloadRequest.ToString;
+      (*
+      When JSON pairs, JSON values, or JSON objects contain special characters,
+      and if we convert the entire JSON object to a string,
+      escape characters are automatically removed.
+      That's why we call EscapeSpecialChars twice here.
+      However, the same process works fine when we add a JSON string as a string value into the JSON pair
+      *)
+      sReqstr := EscapeSpecialChars(sReqstr);
+
+      if sRMQ_APIURL = '' then
+        sRMQ_APIURL := 'https://localhost:7123/ARMPushToQueue';
+
+      // jsonPushToQueue_ReqPayload.AddPair(TJSONPair.Create('url',sScripts_APIURL));
+      // jsonPushToQueue_ReqPayload.AddPair(TJSONPair.Create('method','POST'));
+      // Seralizeing sReqstr to be done , As of now " handled.
+      jsonPushToQueue_ReqPayload.AddPair('queuename', sNotifyQueueName);
+      jsonPushToQueue_ReqPayload.AddPair('queuedata',
+        sReqstr { ReplaceStr(sReqstr,'"','\"') } );
+      jsonPushToQueue_ReqPayload.AddPair('timespandelay', sDelayedMessageTimeInMs);
+      // jsonPushToQueue_ReqPayload.AddPair(TJSONPair.Create('payload',{TJSONObject.ParseJSONValue}(ReplaceStr(sReqstr,'"','\"'))));
+      // jsonPushToQueue_ReqPayload.AddPair(TJSONPair.Create('trace',sTrace));
+
+      //sReqstr := EscapeSpecialChars(jsonPushToQueue_ReqPayload.ToString);
+      sReqstr := jsonPushToQueue_ReqPayload.ToString;
+      // ExecuteAPI
+      structdef.axprovider.dbm.gf.DoDebug.msg
+        ('PushMessageToRMQ - API URL : ' + sRMQ_APIURL);
+      structdef.axprovider.dbm.gf.DoDebug.msg
+        ('PushMessageToRMQ - Request String : ' + sReqstr);
+
+      sServiceResult := ProfitEVAL.ExecuteAPI(sUniqueId, sRMQ_APIURL, sService,
+        sMethod, sParamstr, sHeaderstr, sReqstr);
+      structdef.axprovider.dbm.gf.DoDebug.msg
+        ('PushMessageToRMQ - ServiceResult : ' + sServiceResult);
+    except
+      on E: Exception do
+        structdef.axprovider.dbm.gf.DoDebug.msg('Error in PushMessageToRMQ : ' +
+          E.Message);
+    end;
+  finally
+    // if Assigned(jsonPushToQueue_ReqPayload) then
+    // FreeAndNil(jsonPushToQueue_ReqPayload);
+    jsonPushToQueue_ReqPayload := nil;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('PushMessageToRMQ ends.');
+end;
+
+// GetRecID
+Function TPublishToRMQ.GetRecID: String;
+Var
+  xQry: TXDS;
+  sWhrStr: String;
+begin
+  Result := '0';
+  xQry := structdef.axprovider.dbm.GetXDS(nil);
+  Try
+    structdef.axprovider.dbm.gf.DoDebug.msg('GetRecID starts...');
+    sWhrStr := ' KeyValue = ' + quotedstr(sKeyValue) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(TaskType) = ''make'' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(ProcessName) = ' +
+      LowerCase(quotedstr(sProcessName)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(Transid) = ' +
+      LowerCase(quotedstr(sTransId));
+    xQry.buffered := true;
+    xQry.CDS.CommandText := 'select RecordId from AxActiveTaskStatus where '
+      + sWhrStr;
+    xQry.CDS.open;
+    if xQry.CDS.RecordCount > 0 then
+    begin
+      xQry.CDS.First;
+      Result := xQry.CDS.FieldByName('RecordId').AsString
+    end;
+    structdef.axprovider.dbm.gf.DoDebug.msg('GetRecID ends.');
+  Finally
+    xQry.close;
+    FreeAndNil(xQry);
+  End;
+end;
+
+// GetDataSet
+Function TPublishToRMQ.GetDataSet(pSQLText: String): TXDS;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/GetDataSet starts...');
+  Result := nil;
+  if pSQLText = '' then
+    Exit;
+  try
+    Result := structdef.axprovider.dbm.GetXDS(nil);
+    Result.buffered := true;
+    Result.CDS.CommandText := pSQLText;
+    Result.open;
+  Except
+    on E: Exception do
+    begin
+      structdef.axprovider.dbm.gf.DoDebug.Log
+        (structdef.axprovider.dbm.gf.Axp_logstr + '\uPublishToRMQ\GetDataSet - '
+        + E.Message);
+      if Assigned(Result) then
+      begin
+        if Result.Active then
+          Result.close;
+        FreeAndNil(Result);
+      end;
+      structdef.axprovider.dbm.gf.DoDebug.msg
+        ('uPublishToRMQ/GetDataSet Error : ' + E.Message);
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/GetDataSet ends.');
+end;
+
+//ConvertTimestampToDateTime
+function TPublishToRMQ.ConvertTimestampToDateTime(const timestamp: string): string;
+var
+  year, month, day, hour, minute, second, ms: Word;
+begin
+  // Extract the individual date and time components from the timestamp
+  year := StrToInt(Copy(timestamp, 1, 4));
+  month := StrToInt(Copy(timestamp, 5, 2));
+  day := StrToInt(Copy(timestamp, 7, 2));
+  hour := StrToInt(Copy(timestamp, 9, 2));
+  minute := StrToInt(Copy(timestamp, 11, 2));
+  second := StrToInt(Copy(timestamp, 13, 2));
+  ms := StrToInt(Copy(timestamp, 15, 3));
+
+  // Create a TDateTime value using the extracted components
+  //Result := Format('%4d-%2.2d-%2.2d %2.2d:%2.2d:%2.2d.%3.3d', [year, month, day, hour, minute, second, ms]);
+  Result := Format('%4d/%2.2d/%2.2d %2.2d:%2.2d:%2.2d', [year, month, day, hour, minute, second]);
+  try
+    //Result := formatdatetime(structdef.axprovider.dbm.gf.ShortDateFormat.ShortDateFormat,StrtoDateTime(Result));
+    Result := formatdatetime(structdef.axprovider.dbm.gf.ShortDateFormat.ShortDateFormat,EncodeDate(year,month,day)) +' '+
+    formatdatetime(structdef.axprovider.dbm.gf.ShortDateFormat.LongTimeFormat,EncodeTime(hour,minute,second,ms))
+  except
+  end;
+end;
+
+
+//GetTransInitDateTime
+Function TPublishToRMQ.GetTransInitDateTime:String;
+var
+  PegGetTaskIDXDS: TXDS;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg('GetTransInitDateTime starts...');
+  Result := '';
+  PegGetTaskIDXDS := nil;
+  try
+    try
+    PegGetTaskIDXDS := structdef.axprovider.dbm.GetXDS(nil);
+    PegGetTaskIDXDS.buffered := True;
+    PegGetTaskIDXDS.CDS.CommandText := 'Select eventdatetime from AxActiveTasks a where '+
+                'lower(ProcessName)='+QuotedStr(lowercase(sProcessName))+ ' and '+
+                //'lower(Taskname)='+QuotedStr(lowercase(sTaskName))+ ' and '+
+                'lower(TaskType)='+QuotedStr('make')+ ' and '+
+                'lower(KeyValue)='+QuotedStr(lowercase(sKeyValue))+ ' and '+
+                //'lower(Transid)='+QuotedStr(lowercase(sTransId))+ ' and '+
+                ' IndexNo = 1 '+ //index 1
+                ' order by eventdatetime,IndexNo asc';
+
+    PegGetTaskIDXDS.open;
+    if PegGetTaskIDXDS.CDS.RecordCount > 0 then
+       Result := PegGetTaskIDXDS.CDS.FieldByName('eventdatetime').AsString;
+    Except on E:Exception do
+    begin
+      structdef.axprovider.dbm.gf.DoDebug.msg('Error in GetTransInitDateTime '+E.Message);
+    end;
+    end;
+  finally
+    if Assigned(PegGetTaskIDXDS) then
+      FreeAndNil(PegGetTaskIDXDS);
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('GetTransInitDateTime ends.');
+end;
+
+//CalculateTargetDateTime
+function CalculateTargetDateTime(const sInitDateTime: string; const sAddBeforeOrAfter: string;
+  iDays, iHrs, iMinutes: Integer): TDateTime;
+var
+  dtInit: TDateTime;
+begin
+  try
+    dtInit := StrToDateTime(sInitDateTime);
+
+    if SameText(sAddBeforeOrAfter, 'before') then
+      Result := IncMinute(IncHour(IncDay(dtInit, -iDays), -iHrs), -iMinutes)
+    else //if SameText(sAddBeforeOrAfter, 'after') then //or sAddBeforeOrAfter = ''
+      Result := IncMinute(IncHour(IncDay(dtInit, iDays), iHrs), iMinutes);
+    //else
+      //raise Exception.Create('Invalid value for sAddBeforeOrAfter');
+
+  except
+    on E: Exception do
+      raise Exception.Create('Error calculating target datetime: ' + E.Message);
+  end;
+end;
+
+//CalculateTimeDifferenceInMilliseconds
+function CalculateTimeDifferenceInMilliseconds(const CurrentDateTime, TargetDateTime: TDateTime): Int64;
+begin
+  if TargetDateTime < CurrentDateTime then
+    raise Exception.Create('TargetDateTime cannot be less than CurrentDateTime');
+
+  Result := MilliSecondsBetween(TargetDateTime, CurrentDateTime);
+end;
+
+
+
+// PrepareReminderDetails | Function to get reminder details
+function TPublishToRMQ.PrepareReminderDetails: String;
+var
+  ReminderXDS: TXDS;
+  sSQLText: String;
+  sDays, sHours, sMinutes: String;
+  iDays, iHours, iMinutes : Integer;
+  iMessageDelayTimeInMs : Int64;
+
+  // StartFrom - This field can be the Date of notification, Date of initiation, date fields from the form, or specific global variables.
+  sRemindStartFrom ,
+  sRemindStartFromCondition, sRemindStartFromField,
+  sRemindStartDateTime, sCurrentDateTime,
+  // When - before/after
+  sRemindWhen  : String;
+  CurrentDateTime,TargetDateTime : TDateTime;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareReminderDetails starts...');
+  Result := '';
+  ReminderXDS := nil;
+  try
+    sSQLText :=
+      (*
+      ' select processname,taskname,tasktype,keyfield,transid,remindday,reminderhr,remindmin,remindnotify '
+      + ' from axprocessdef aa,axprocessdef_reminder bb ' +
+      ' where bb.axprocessdefid = aa.axprocessdefid ' + ' and ' +
+      *)
+      //StartFrom & RemindWhen to be inculded in query.
+      ' select reminderstartfrom,reminderstartfname,reminderstartwhen,reminderstartcnd,'+
+      ' processname,taskname,tasktype,keyfield,transid,remindday,reminderhr,remindmin,remindnotify '
+      + ' from '+sProcessTable+' aa,'+sReminderTable+' bb ' +
+      ' where bb.'+sProcessTable+'id = aa.'+sProcessTable+'id ' + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.processname) = ' +
+      quotedstr(LowerCase(sProcessName)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.TaskName) = ' +
+      quotedstr(LowerCase(sTaskName)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.Transid) = ' +
+      quotedstr(LowerCase(sTransId)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.Active) = ''t'' ';
+
+    try
+      ReminderXDS := GetDataSet(sSQLText);
+      if Assigned(ReminderXDS) and (ReminderXDS.CDS.RecordCount > 0) then
+      begin
+        // Create a copy of the JSON object
+        jsonPayloadRequestCopy := TJSONObject(jsonPayloadRequest.Clone);
+        ReminderXDS.CDS.First;
+        while Not ReminderXDS.CDS.Eof do
+        begin
+          sNotifyTemplate := ReminderXDS.CDS.FieldByName
+            ('remindnotify').AsString;
+          if sNotifyTemplate <> '' then
+          begin
+            //jsonPayloadRequest modified in another methods to keep its actual data we use jsonPayloadRequestCopy
+            jsonPayloadRequest := TJSONObject(jsonPayloadRequestCopy.Clone);
+            jsonInnerObject := jsonPayloadRequest.Get(0)
+              .JsonValue as TJSONObject;
+            jsonInnerObject.RemovePair('notifytemplate').free;
+
+            jsonInnerObject.AddPair(TJSONPair.create('notifytemplate',
+              sNotifyTemplate));
+
+            sRemindStartFrom := lowercase(ReminderXDS.CDS.FieldByName('reminderstartfrom').AsString);
+            //It holds whether the selected start from var is , form var,taskparam or global var
+            {
+            cnd field values
+              static - Date of initiation ,Date of notification
+              axvars - date fields
+              field - tstruct date fields
+              GloVar - date fields
+              Taskparam - taskparams date fields
+            }
+            sRemindStartFromCondition := lowercase(ReminderXDS.CDS.FieldByName('reminderstartcnd').AsString);
+            //It holds whether the selected start from var name
+            sRemindStartFromField := lowercase(ReminderXDS.CDS.FieldByName('reminderstartfname').AsString);
+            sRemindWhen := lowercase(ReminderXDS.CDS.FieldByName('reminderstartwhen').AsString);
+
+            CurrentDateTime := structdef.axprovider.dbm.getserverdatetime;
+            sCurrentDateTime := datetimetostr(CurrentDateTime);
+            //date of notification - when task assigned
+            if sRemindStartFrom = 'date of notification' then
+            begin
+               sRemindStartDateTime := datetimetostr(CurrentDateTime);
+            end
+            //date of initiation - when transaction is created
+            else if sRemindStartFrom = 'date of initiation' then
+            begin
+                sRemindStartDateTime := ConvertTimestampToDateTime(GetTransInitDateTime);//ConvertTimestampToDateTime
+                sRemindStartDateTime :=
+                structdef.axprovider.dbm.gf.ConvertToDbDateTime
+                (structdef.axprovider.dbm.connection.dbtype,StrToDateTime(sRemindStartDateTime));
+            end
+            else if (sRemindStartFromField <> '') then//date fields from the form, or specific global variables | will be available in the TaskParams
+            begin
+              //As of now we have not used sRemindStartFromCondition to differente variable , it just get value from parser and executes
+              sRemindStartDateTime := GetValue(sRemindStartFromField);
+            end;
+
+            if sRemindStartDateTime = '' then
+              sRemindStartDateTime := sCurrentDateTime;
+
+            sDays := ReminderXDS.CDS.FieldByName('remindday').AsString;
+            if sDays = '' then
+              sDays := '0';
+
+            sHours := ReminderXDS.CDS.FieldByName('reminderhr').AsString;
+            if sHours = '' then
+              sHours := '0';
+
+            sMinutes := ReminderXDS.CDS.FieldByName('remindmin').AsString;
+            if sMinutes = '' then
+              sMinutes := '0';
+
+            iDays := StrToInt(sDays);
+            iHours := StrToInt(sHours);
+            iMinutes := StrToInt(sMinutes);
+
+            //CalculateTargetDateTime
+            structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/PrepareReminderDetails/CalculateTargetDateTime');
+            structdef.axprovider.dbm.gf.DoDebug.msg('Start DateTime : '+sRemindStartDateTime);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Start When : '+sRemindWhen);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Days : '+sDays);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Hours : '+sHours);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Minutes : '+sMinutes);
+
+            TargetDateTime := CalculateTargetDateTime(sRemindStartDateTime,
+                              sRemindWhen,iDays,iHours,iMinutes);
+
+            structdef.axprovider.dbm.gf.DoDebug.msg('Remind DateTime : '+DateTimeToStr(TargetDateTime));
+
+            structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/PrepareReminderDetails/CalculateTimeDifferenceInMilliseconds');
+            iMessageDelayTimeInMs := CalculateTimeDifferenceInMilliseconds(CurrentDateTime,TargetDateTime);
+
+            structdef.axprovider.dbm.gf.DoDebug.msg('Remind delaytime : '+IntToStr(iMessageDelayTimeInMs));
+
+            //The below code is for old logic which is commented now
+            //iMessageDelayTimeInMs := GetDaysInMilliSeconds(iDays, iHours,
+              //iMinutes);
+
+            PushMessageToRMQ(jsonPayloadRequest.ToString,
+              InttoStr(iMessageDelayTimeInMs));
+          end
+          else
+            structdef.axprovider.dbm.gf.DoDebug.msg
+              ('uPublishToRMQ/PrepareReminderDetails - Reminder template not available for TaskName '
+              + sTaskName);
+          ReminderXDS.CDS.Next;
+        end;
+
+      end;
+
+    except
+      on E: Exception do
+        structdef.axprovider.dbm.gf.DoDebug.msg
+          ('uPublishToRMQ/Error in PrepareReminderDetails ' + E.Message);
+    end;
+  finally
+    if Assigned(ReminderXDS) then
+    begin
+      if ReminderXDS.Active then
+        ReminderXDS.close;
+      FreeAndNil(ReminderXDS);
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareReminderDetails ends.');
+end;
+
+// PrepareEscalationDetails | Function to get Escalation details
+function TPublishToRMQ.PrepareEscalationDetails: String;
+var
+  EscalateXDS: TXDS;
+  sSQLText: String;
+
+  sDays, sHours, sMinutes: String;
+  iDays, iHours, iMinutes : Integer;
+  iMessageDelayTimeInMs : Int64;
+
+  sEscalateAction, sEscalateToActor, sEscalateNotifyTo,
+    sEscalateNotifyActor,sEscalateActionFlag: String;
+
+  // StartFrom - This field can be the Date of notification, Date of initiation, date fields from the form, or specific global variables.
+  sEscalateStartFrom ,
+  sEscalateStartFromCondition, sEscalateStartFromField,
+  sEscalateStartDateTime, sCurrentDateTime,
+  // When - before/after
+  sEscalateWhen  : String;
+  CurrentDateTime,TargetDateTime : TDateTime;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareEscalationDetails starts...');
+  Result := '';
+  EscalateXDS := nil;
+  try
+    sSQLText :=
+      (*
+      'select processname,taskname,tasktype,keyfield,transid,escalateday,escalatehr,escalatemin,escalatetemplate,'
+      + 'escalate,escalateflg,escalatetoactor,escalate_notifyto,notifytoactor ' +
+      ' from axprocessdef aa,axprocessdef_escalation bb ' +
+      ' where bb.axprocessdefid = aa.axprocessdefid ' + ' and ' +
+      *)
+      'select escalationstartfrom,escalationstartwhen,escalationstartcnd,escalationstartfname,'+
+      ' processname,taskname,tasktype,keyfield,transid,escalateday,escalatehr,escalatemin,escalatetemplate,'
+      + 'escalate,escalateflg,escalatetoactor,escalate_notifyto,notifytoactor ' +
+      ' from '+sProcessTable+' aa,'+sEscalaitonTable+' bb ' +
+      ' where bb.'+sProcessTable+'id = aa.'+sProcessTable+'id ' + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.processname) = ' +
+      quotedstr(LowerCase(sProcessName)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.TaskName) = ' +
+      quotedstr(LowerCase(sTaskName)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.Transid) = ' +
+      quotedstr(LowerCase(sTransId)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.Active) = ''t'' ';
+
+    try
+      EscalateXDS := GetDataSet(sSQLText);
+      if Assigned(EscalateXDS) and (EscalateXDS.CDS.RecordCount > 0) then
+      begin
+        // Create a copy of the JSON object
+        jsonPayloadRequestCopy := TJSONObject(jsonPayloadRequest.Clone);
+        EscalateXDS.CDS.First;
+        while Not EscalateXDS.CDS.Eof do
+        begin
+          sNotifyTemplate := EscalateXDS.CDS.FieldByName
+            ('escalatetemplate').AsString;
+          (*
+          This check is not required for Escalation
+          since escalation can be triggered with out notification also
+          *)
+          //if sNotifyTemplate <> '' then
+          begin
+            //jsonPayloadRequest modified in another methods to keep its actual data we use jsonPayloadRequestCopy
+            jsonPayloadRequest := TJSONObject(jsonPayloadRequestCopy.Clone);
+            jsonInnerObject := jsonPayloadRequest.Get(0)
+              .JsonValue as TJSONObject;
+            jsonInnerObject.RemovePair('notifytemplate').free;
+
+            jsonInnerObject.AddPair(TJSONPair.create('notifytemplate',
+              sNotifyTemplate));
+
+            sEscalateAction := EscalateXDS.CDS.FieldByName('escalate').AsString;
+            jsonInnerObject.AddPair(TJSONPair.create('escalateaction',
+              sEscalateAction));
+
+            sEscalateActionFlag := EscalateXDS.CDS.FieldByName('escalateflg').AsString;
+            jsonInnerObject.AddPair(TJSONPair.create('escalateactionflag',
+              sEscalateActionFlag));
+
+            sEscalateToActor := EscalateXDS.CDS.FieldByName
+              ('escalatetoactor').AsString;
+            jsonInnerObject.AddPair(TJSONPair.create('escalatetoactor',
+              sEscalateToActor));
+
+            // Purpose of below two fields(escalate_notifyto,notifytoactor) need to be discussed
+            sEscalateNotifyTo := EscalateXDS.CDS.FieldByName
+              ('escalate_notifyto').AsString;
+            jsonInnerObject.AddPair(TJSONPair.create('escalatenotifyto',
+              sEscalateNotifyTo));
+
+            sEscalateNotifyActor := EscalateXDS.CDS.FieldByName
+              ('notifytoactor').AsString;
+            jsonInnerObject.AddPair(TJSONPair.create('escalatenotifyactor',
+              sEscalateNotifyActor));
+
+            sEscalateStartFrom := lowercase(EscalateXDS.CDS.FieldByName('escalationstartfrom').AsString);
+            //It holds whether the selected start from var is , form var,taskparam or global var
+            {
+            cnd field values
+              static - Date of initiation ,Date of notification
+              axvars - date fields
+              field - tstruct date fields
+              GloVar - date fields
+              Taskparam - taskparams date fields
+            }
+            sEscalateStartFromCondition := lowercase(EscalateXDS.CDS.FieldByName('escalationstartcnd').AsString);
+            //It holds whether the selected start from var name
+            sEscalateStartFromField := lowercase(EscalateXDS.CDS.FieldByName('escalationstartfname').AsString);
+            sEscalateWhen := lowercase(EscalateXDS.CDS.FieldByName('escalationstartwhen').AsString);
+
+            CurrentDateTime := structdef.axprovider.dbm.getserverdatetime;
+            sCurrentDateTime := datetimetostr(CurrentDateTime);
+            //date of notification - when task assigned
+            if sEscalateStartFrom = 'date of notification' then
+            begin
+               sEscalateStartDateTime := datetimetostr(CurrentDateTime);
+            end
+            //date of initiation - when transaction is created
+            else if sEscalateStartFrom = 'date of initiation' then
+            begin
+                sEscalateStartDateTime := ConvertTimestampToDateTime(GetTransInitDateTime);//ConvertTimestampToDateTime
+                sEscalateStartDateTime :=
+                structdef.axprovider.dbm.gf.ConvertToDbDateTime
+                (structdef.axprovider.dbm.connection.dbtype,StrToDateTime(sEscalateStartDateTime));
+            end
+            else if (sEscalateStartFromField <> '') then//date fields from the form, or specific global variables | will be available in the TaskParams
+            begin
+              //As of now we have not used sEscalateStartFromCondition to differente variable , it just get value from parser and executes
+              sEscalateStartDateTime := GetValue(sEscalateStartFromField);
+            end;
+
+            if sEscalateStartDateTime = '' then
+              sEscalateStartDateTime := sCurrentDateTime;
+
+            sDays := EscalateXDS.CDS.FieldByName('escalateday').AsString;
+            if sDays = '' then
+              sDays := '0';
+
+            sHours := EscalateXDS.CDS.FieldByName('escalatehr').AsString;
+            if sHours = '' then
+              sHours := '0';
+
+            sMinutes := EscalateXDS.CDS.FieldByName('escalatemin').AsString;
+            if sMinutes = '' then
+              sMinutes := '0';
+
+            iDays := StrToInt(sDays);
+            iHours := StrToInt(sHours);
+            iMinutes := StrToInt(sMinutes);
+
+
+            //CalculateTargetDateTime
+            structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/PrepareReminderDetails/CalculateTargetDateTime');
+            structdef.axprovider.dbm.gf.DoDebug.msg('Start DateTime : '+sEscalateStartDateTime);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Start When : '+sEscalateWhen);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Days : '+sDays);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Hours : '+sHours);
+            structdef.axprovider.dbm.gf.DoDebug.msg('Minutes : '+sMinutes);
+
+            TargetDateTime := CalculateTargetDateTime(sEscalateStartDateTime,
+                              sEscalateWhen,iDays,iHours,iMinutes);
+
+            structdef.axprovider.dbm.gf.DoDebug.msg('Escalate DateTime : '+DateTimeToStr(TargetDateTime));
+
+            structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/PrepareReminderDetails/CalculateTimeDifferenceInMilliseconds');
+            iMessageDelayTimeInMs := CalculateTimeDifferenceInMilliseconds(CurrentDateTime,TargetDateTime);
+
+            structdef.axprovider.dbm.gf.DoDebug.msg('Escalate delaytime : '+IntToStr(iMessageDelayTimeInMs));
+
+            //The below code is for old logic which is commented now
+            //iMessageDelayTimeInMs := GetDaysInMilliSeconds(iDays, iHours,
+              //iMinutes);
+
+            PushMessageToRMQ(jsonPayloadRequest.ToString,
+              InttoStr(iMessageDelayTimeInMs));
+          end;
+          //else
+          //  structdef.axprovider.dbm.gf.DoDebug.msg
+          //    ('uPublishToRMQ/PrepareReminderDetails - Escalation template not available for TaskName '
+          //    + sTaskName);
+          EscalateXDS.CDS.Next;
+        end;
+      end;
+
+    except
+      on E: Exception do
+        structdef.axprovider.dbm.gf.DoDebug.msg
+          ('uPublishToRMQ/Error in PrepareEscalationDetails ' + E.Message);
+    end;
+  finally
+    if Assigned(EscalateXDS) then
+    begin
+      if EscalateXDS.Active then
+        EscalateXDS.close;
+      FreeAndNil(EscalateXDS);
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareEscalationDetails ends.');
+end;
+
+
+// PrepareNotificationDetails | Function to get Notification details
+function TPublishToRMQ.PrepareNotificationDetails: String;
+var
+  NotifyXDS: TXDS;
+  sBaseSQL,sSQLText: String;
+  sDays, sHours, sMinutes: String;
+  iDays, iHours, iMinutes, iMessageDelayTimeInMs: Integer;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareNotificationDetails starts...');
+  Result := '';
+  NotifyXDS := nil;
+  try
+    if bIsTaskNotification then
+      sBaseSQL :=   ' select TaskNotification '
+      + ' from '+sProcessTable+' aa'
+    else
+      sBaseSQL :=   ' select PostNotify,PostNotify_return,PostNotify_reject '
+      + ' from '+sProcessTable+' aa';
+
+    sSQLText := sBaseSQL+' where '+
+      structdef.axprovider.dbm.gf.sqllower + '(aa.processname) = ' +
+      quotedstr(LowerCase(sProcessName)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.TaskName) = ' +
+      quotedstr(LowerCase(sTaskName)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.Transid) = ' +
+      quotedstr(LowerCase(sTransId)) + ' and ' +
+      structdef.axprovider.dbm.gf.sqllower + '(aa.Active) = ''t'' ';
+
+    try
+      NotifyXDS := GetDataSet(sSQLText);
+      if Assigned(NotifyXDS) and (NotifyXDS.CDS.RecordCount > 0) then
+      begin
+        // Create a copy of the JSON object
+        jsonPayloadRequestCopy := TJSONObject(jsonPayloadRequest.Clone);
+        NotifyXDS.CDS.First;
+        while Not NotifyXDS.CDS.Eof do
+        begin
+          if bIsTaskNotification then
+          begin
+            sNotifyTemplate := NotifyXDS.CDS.FieldByName
+              ('TaskNotification').AsString
+          end
+          else
+          begin
+            sServiceName := Lowercase(sServiceName);
+            if sServiceName = 'axreturn' then
+              sNotifyTemplate := NotifyXDS.CDS.FieldByName
+                ('PostNotify_return').AsString
+            else if sServicename = 'axreject' then
+              sNotifyTemplate := NotifyXDS.CDS.FieldByName
+                ('PostNotify_reject').AsString
+            else
+              sNotifyTemplate := NotifyXDS.CDS.FieldByName
+                ('PostNotify').AsString;
+          end;
+
+          if sNotifyTemplate <> '' then
+          begin
+            //jsonPayloadRequest modified in another methods to keep its actual data we use jsonPayloadRequestCopy
+            jsonPayloadRequest := TJSONObject(jsonPayloadRequestCopy.Clone);
+            jsonInnerObject := jsonPayloadRequest.Get(0)
+              .JsonValue as TJSONObject;
+            jsonInnerObject.RemovePair('notifytemplate').free;
+
+            jsonInnerObject.AddPair(TJSONPair.create('notifytemplate',
+              sNotifyTemplate));
+
+            if bIsTaskNotification then
+              jsonInnerObject.AddPair(TJSONPair.create('istasknotification',
+              'true'))
+            else
+              jsonInnerObject.AddPair(TJSONPair.create('istasknotification',
+              'false'));
+
+            iMessageDelayTimeInMs := 0;
+
+            PushMessageToRMQ(jsonPayloadRequest.ToString,
+              InttoStr(iMessageDelayTimeInMs));
+          end
+          else
+            structdef.axprovider.dbm.gf.DoDebug.msg
+              ('uPublishToRMQ/PrepareNotificationDetails - Notification template not available for TaskName '
+              + sTaskName);
+          NotifyXDS.CDS.Next;
+        end;
+
+      end;
+
+    except
+      on E: Exception do
+        structdef.axprovider.dbm.gf.DoDebug.msg
+          ('uPublishToRMQ/Error in PrepareNotificationDetails ' + E.Message);
+    end;
+  finally
+    if Assigned(NotifyXDS) then
+    begin
+      if NotifyXDS.Active then
+        NotifyXDS.close;
+      FreeAndNil(NotifyXDS);
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareReminderDetails ends.');
+end;
+
+
+// PrepareScriptsRequestPayload
+(*
+  {
+  "scriptsapi": {
+  "axpapp": "traineenew",
+  "username": "admin",
+  "scriptname": "axpeg_reminder",
+  "stype": "tstructs",
+  "sname": "regnc",
+  "recordid": "1011550000000",
+  "trace": "false",
+  "notifytemplate": "notify1",
+  "taskid": "1011550000003",
+  "keyvalue": "CC000182"
+  },
+  "varlist": {
+  "row": {}
+  },
+  "globalvars": {},
+  "uservars": {},
+  "apiparams": {}
+  }
+*)
+Procedure TPublishToRMQ.PrepareScriptsRequestPayload;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareScriptsRequestPayload starts...');
+  try
+    sRecordId := GetRecID;
+    if structdef.axprovider.dbm.gf.DoDebug.Active then
+      sTrace := 'True';
+
+    sStructType := 'tstructs';
+
+    // reset json object
+    if Assigned(jsonInnerObject) then
+      jsonInnerObject := nil;
+
+    if Assigned(jsonPayloadRequest) then
+      jsonPayloadRequest := nil;
+
+    jsonPayloadRequest := TJSONObject.create();
+    jsonInnerObject := TJSONObject.create;
+
+    jsonInnerObject.AddPair(TJSONPair.create('axpapp',
+      structdef.axprovider.dbm.connection.connectionname));
+    jsonInnerObject.AddPair(TJSONPair.create('username',
+      structdef.axprovider.dbm.gf.username));
+    jsonInnerObject.AddPair(TJSONPair.create('scriptname', sScriptName));
+    jsonInnerObject.AddPair(TJSONPair.create('stype', sStructType));
+    jsonInnerObject.AddPair(TJSONPair.create('sname', sTransId));
+    jsonInnerObject.AddPair(TJSONPair.create('recordid', sRecordId));
+    jsonInnerObject.AddPair(TJSONPair.create('trace', sTrace));
+    jsonInnerObject.AddPair(TJSONPair.create('notifytemplate',
+      sNotifyTemplate));
+    jsonInnerObject.AddPair(TJSONPair.create('taskid', sTaskId));
+    jsonInnerObject.AddPair(TJSONPair.create('processname', sProcessName));
+    jsonInnerObject.AddPair(TJSONPair.create('taskname', sTaskName));
+    jsonInnerObject.AddPair(TJSONPair.create('keyfield', sKeyField));
+    jsonInnerObject.AddPair(TJSONPair.create('keyvalue', sKeyValue));
+
+    jsonPayloadRequest.AddPair('scriptsapi', jsonInnerObject);
+    jsonPayloadRequest.AddPair('varlist',
+      TJSONObject.ParseJSONValue('{"row":{}}'));
+
+    structdef.axprovider.dbm.gf.DoDebug.msg
+      ('uPublishToRMQ/Scripts RequestPayload ' + jsonPayloadRequest.ToString);
+  finally
+    // if Assigned(jsonInnerObject) then
+    // FreeAndNil(jsonInnerObject);
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PrepareScriptsRequestPayload ends.');
+end;
+
+// SetPEGTables
+Procedure TPublishToRMQ.SetPEGTables;
+begin
+  if bIsPEGV2 then
+  begin
+    sProcessTable := 'axprocessdefv2';
+    sEscalaitonTable := 'axprocessdefv2_escalation';
+    sReminderTable := 'axprocessdefv2_reminder';
+  end
+  else
+  begin
+    sProcessTable := 'axprocessdef';
+    sEscalaitonTable := 'axprocessdef_escalation';
+    sReminderTable := 'axprocessdef_reminder';
+  end;
+end;
+
+// PublishMessage
+function TPublishToRMQ.PublishMessage: String;
+begin
+  structdef.axprovider.dbm.gf.DoDebug.msg
+    ('uPublishToRMQ/PublishMessage starts...');
+  try
+    sNotifyTemplate := '';
+    sNotifyQueueName := '';
+    SetPEGTables;
+    GetRMQAPIURL;
+    GetScriptsAPIURL;
+
+    if bScriptJobs then
+    begin
+
+    end
+    else
+    begin
+      if (bRemind) or (bEscalate) or (bNotification) then
+      begin
+        (*
+          if bRemind then
+          sScriptName := 'axpeg_reminder'
+          else
+          sScriptName := 'axpeg_escalation';
+        *)
+        // PrepareScriptsRequestPayload;//Prepare payload request
+        if bRemind then
+        begin
+          sScriptName := 'axpeg_reminder';
+          PrepareScriptsRequestPayload; // Prepare payload request
+          sNotifyQueueName := 'axpeg_reminder';
+          PrepareReminderDetails;
+        end;
+        if bEscalate then
+        begin
+          sScriptName := 'axpeg_escalation';
+          PrepareScriptsRequestPayload; // Prepare payload request
+          sNotifyQueueName := 'axpeg_escalation';
+          PrepareEscalationDetails;
+        end;
+        if bNotification then
+        begin
+          sScriptName := 'axpeg_notification';
+          PrepareScriptsRequestPayload; // Prepare payload request
+          sNotifyQueueName := 'axpeg_notification';
+          PrepareNotificationDetails;
+        end;
+      end;
+    end;
+  except
+    on E: Exception do
+    begin
+      structdef.axprovider.dbm.gf.DoDebug.msg
+        ('uPublishToRMQ/Error in PublishMessage : ' + E.Message);
+    end;
+  end;
+  structdef.axprovider.dbm.gf.DoDebug.msg('uPublishToRMQ/PublishMessage ends.');
+end;
+
+end.

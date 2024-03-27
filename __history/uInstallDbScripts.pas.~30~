@@ -1,0 +1,225 @@
+unit uInstallDbScripts;
+
+interface
+
+uses
+  Windows, Messages, SysUtils, Variants, Classes, Vcl.Graphics, Vcl.Controls,
+  Vcl.StdCtrls,
+  Data.db, XMLDoc,
+  XMLIntf, uxds, uAxProvider, uGeneralFunctions, uProfitEval,
+  IdBaseComponent, IdTCPConnection, IdTCPClient, IdFTP, IdComponent,
+  Vcl.ComCtrls,
+  Rio, SOAPHTTPClient, Vcl.buttons, Vcl.ExtCtrls, shellapi, uIviewXML, uxsmtp,
+  uStoreData,
+  uStructDef, uPDFPrint, xcallservice, adodb, Vcl.grids, uValidate,
+  uAutoPageCreate,
+  System.StrUtils, dateutils, uCreateIview, uCreateIviewStructure, uIviewTables,
+  uPropsXML, idGlobal, IdSMTP, IdSSLOpenSSL, IdMessage,
+  IdExplicitTLSClientServerBase,
+  idreplysmtp, MessageDigest_5, uStructInTable, uCreateStructure, uUtils,
+  IdHTTP,
+  Soap.EncdDecd, IdCoder, IdCoder3to4, IdCoderMIME, uDBManager, uConnect,
+  uCompress, ZLib,system.Types,system.IOUtils,
+{$IF CompilerVersion > 24.0}
+  JSON
+{$ELSE}
+  DBXJson
+{$IFEND}
+    ;
+
+type
+  TInstallDbScripts = class
+  private
+    procedure ExecuteSQLFile(pSQLFileName: String);
+  public
+
+    function ExecuteDBScripts: string;
+  end;
+
+implementation
+
+function TInstallDbScripts.ExecuteDBScripts(): string;
+var
+  AxScriptPath: string;
+  FileList: TStringDynArray;
+  I, filecount: integer;
+  fileArray: TArray<string>;
+  searchRec: TSearchRec;
+  indbs:TInstallDbScripts;
+begin
+  writeln('  - Executing DB Scripts:');
+  Console_write('   - Reading and executing database scripts.', 10);
+  writeln;
+  writeln;
+  try
+    indbs:=TInstallDbScripts.create;
+    AxScriptPath := pluginLocalPath + selectedPlugin + '\' + cDBScripts + '\';
+    // FolderList := TDirectory.GetDirectories(AxScriptPath);
+    if FindFirst(AxScriptPath + '*.sql', faAnyFile, searchRec) = 0 then
+    begin
+      fileArray := TArray<string>(TDirectory.GetFiles(AxScriptPath));
+      filecount:=length(fileArray);
+      for I := 0 to filecount-1 do
+        begin
+          indbs.ExecuteSQLFile(fileArray[I]);
+        end;
+
+    end;
+  except
+    on E: Exception do
+    begin
+      writeln('Error: ' + E.Message);
+      readln;
+    end;
+
+  end;
+
+  // uExecutedbscript
+ // if FindFirst(DefaultFolderName + '*.*', faAnyFile, searchRec) = 0 then
+end;
+
+
+procedure TInstallDbScripts.ExecuteSQLFile(pSQLFileName: String);
+var
+  tfile, errmsg: String;
+  j: integer;
+
+  slist, sqltext: TStringList;
+  qExec_XDS: TXDS;
+
+  Procedure ExecuteSQL(pSQLText: String);
+  var
+    disp_sqltext: string;
+  begin
+    try
+      if length(pSQLText) > 100 then
+      begin
+        disp_sqltext := copy(pSQLText, 1, 100) + '...';
+      end
+      else
+      begin
+
+        disp_sqltext := pSQLText;
+      end;
+      // Replace line feeds and carriage returns with spaces
+      disp_sqltext := StringReplace(disp_sqltext, #13#10, ' ', [rfReplaceAll]);
+     // WriteLn(' ');
+      Write('    - ');
+      Console_write('Executing Script: ',14);
+      write(disp_sqltext);
+      writeln;
+      if ((Lowercase(copy(trim(pSQLText), 1, 7)) = 'create ') or
+        (Lowercase(copy(trim(pSQLText), 1, 7)) = 'declare ')) and
+        ((Lowercase(dbm.Connection.dbtype) = 'oracle')) then
+      begin
+        qExec_XDS.dbx.SQLConnection.ExecuteDirect(pSQLText);
+
+        WriteLn('    - Done.');
+        writeln('');
+       // writeln;
+      end
+      else if ((Lowercase(copy(trim(pSQLText), 1, 7)) = 'create ') or
+        (Lowercase(copy(trim(pSQLText), 1, 7)) = 'declare ')) and
+        ((Lowercase(dbm.Connection.dbtype) = 'postgre')) then
+      begin
+        try
+          if dbm.Connection.dbx.InTransaction then
+            qExec_XDS.dbx.SQLConnection.ExecuteDirect('savepoint a');
+          qExec_XDS.dbx.SQLConnection.ExecuteDirect(pSQLText);
+          WriteLn('    - Done.');
+        except
+          On e: exception do
+          begin
+            if dbm.Connection.dbx.InTransaction then
+            begin
+              qExec_XDS.dbx.SQLConnection.ExecuteDirect('rollback to a');
+            end;
+            raise;
+          end;
+        end;
+      end
+      else
+      begin
+        qExec_XDS.sql.Clear;
+        qExec_XDS.sql.text := slist.text;
+        qExec_XDS.execsql;
+        WriteLn('    - Done.');
+      end;
+    except
+      on e: exception do
+      begin
+        errmsg := e.Message;
+      end;
+    end;
+    if errmsg <> '' then
+    begin
+      Write('   - Error occurred while executing the query : ' { + sqltext.Text }
+        + #13 + '   - ');
+        Console_write('Error : ',12);
+        write(errmsg);
+        writeln;
+      errmsg := '';
+    end;
+  end;
+
+begin
+  qExec_XDS := nil;
+  slist := nil;
+  sqltext := nil;
+  try
+    qExec_XDS := dbm.GetXDS(nil);
+    slist := TStringList.Create;
+    sqltext := TStringList.Create;
+    tfile := pSQLFileName;
+    if fileexists(tfile) then
+    begin
+      WriteLn('    - Processing SQL file ' +''+
+        ExtractFilename(pSQLFileName)+'');
+      slist.Clear;
+      sqltext.Clear;
+      slist.LoadFromFile(tfile);
+
+      // If there are no multiple SQLs in the file, then exeucte sqltext directly
+      if (pos('<<', slist.text) <= 0) or (pos('>>', slist.text) <= 0) then
+      begin
+        ExecuteSQL(slist.text);
+      end
+      else
+      begin
+        // If there are multiple SQL statements in the file, execute them one by one directly.
+        // SQL statements placed between '<<' and '>>' are used to separate multiple SQL statements.
+        for j := 0 to slist.count - 1 do
+        begin
+          if trim(slist[j]) = '<<' then
+          begin
+            sqltext.Clear;
+          end
+          else if trim(slist[j]) = '>>' then
+          begin
+            ExecuteSQL(sqltext.text);
+          end
+          else
+            sqltext.Add(slist[j]);
+        end;
+      end;
+      Write('    - SQL file ');
+      Console_write(ExtractFilename(pSQLFileName), 10);
+      write(' processed successfully.');
+      Writeln;
+      Writeln('');
+    end;
+  finally
+    if assigned(qExec_XDS) then
+    begin
+      if qExec_XDS.Active then
+        qExec_XDS.close;
+      FreeAndNil(qExec_XDS);
+    end;
+    if assigned(slist) then
+      FreeAndNil(slist);
+    if assigned(slist) then
+      FreeAndNil(sqltext);
+  end;
+end;
+
+end.
